@@ -1,720 +1,1170 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { GameState, MapType } from '../game/Game';
-import { createInitialState, updateGame, handleToolAction } from '../game/GameEngine';
+import { GameState, MapType, SHOP_ITEMS, FARM_GRID } from '../game/Game';
+import { createInitialState, updateGame, handleToolAction, switchMap, spawnText } from '../game/GameEngine';
 import { renderGame, preloadAssets } from '../game/Renderer';
+import { supabase } from '../game/supabase';
+import { fetchTokenBalance } from '../game/blockchain';
+import SplashScreen from '../components/SplashScreen';
+import { transferTokenToUser, getTokenBalance, initializeTokenAccount } from '../game/solanaToken';
 
+/* Exact tool icons from assets folder as requested */
 const TOOLS = [
-  { id: 'shovel', label: 'Shovel', emoji: '🪣', icon: null },
-  { id: 'seed', label: 'Seeds', emoji: '🌱', icon: null },
-  { id: 'tomato', label: 'Tomato', emoji: '🍅', icon: null },
-  { id: 'water', label: 'Water', emoji: '💧', icon: null },
-  { id: 'axe', label: 'Axe', icon: '/kapak_1774349990716.png' },
-  { id: 'hoe', label: 'Hoe', icon: '/kapak_1_1774349990715.png' },
-  { id: 'celurit', label: 'Sickle', icon: '/celurit_1774349990712.png' },
-  { id: 'play', label: 'Run', emoji: '▶', icon: null },
+  { id: 'sickle',  label: 'SICKLE', img: '/celurit_1774349990712.png' },
+  { id: 'hoe',     label: 'HOE',    img: '/kapak_1_1774349990715.png' },
+  { id: 'axe',     label: 'AXE',    img: '/kapak_1774349990716.png' },
+  { id: 'water',   label: 'WATERING CAN', img: '/teko_siram.png' },
+  { id: 'wheat-seed',   label: 'WHEAT',  img: '/wheat.png' },
+  { id: 'tomato-seed',  label: 'TOMATO', img: '/tomato.png' },
+  { id: 'carrot-seed',  label: 'CARROT', img: '/carrot.png' },
+  { id: 'pumpkin-seed', label: 'PUMPKIN',img: '/pumpkin.png' },
+] as const;
+
+const MAPS: { id: MapType; label: string; desc: string }[] = [
+  { id: 'home',    label: 'Farm',     desc: 'Your farm' },
+  { id: 'city',    label: 'City',     desc: 'Buy items' },
+  { id: 'fishing', label: 'Fishing',  desc: 'Catch fish' },
+  { id: 'garden',  label: 'Garden',   desc: 'Meet players' },
+  { id: 'suburban',label: 'Suburban', desc: 'Cozy area' },
 ];
 
-const MAPS: { id: MapType; label: string; icon: string }[] = [
-  { id: 'home', label: 'Farm', icon: '🏡' },
-  { id: 'city', label: 'City', icon: '🏙️' },
-  { id: 'fishing', label: 'Fishing', icon: '🎣' },
-  { id: 'garden', label: 'Garden', icon: '🌺' },
-];
+const MAP_INSTRUCTIONS: Record<MapType, string[]> = {
+  home: [
+    "Welcome to your Farm! Here you can grow crops to earn gold and level up.",
+    "Use the HOE to till the soil first. It prepares the ground for planting.",
+    "Select SEEDS from your inventory and click the Tilled soil to plant them.",
+    "IMPORTANT: Crops only grow when WATERED! Use the Watering Can on dry soil.",
+    "Once mature, click to HARVEST! You'll get Gold and XP rewards.",
+    "You're ready to start your journey! Click 'LET'S PLAY' to begin."
+  ],
+  city: [
+    "Welcome to the City Shops! Your hub for trade and supplies.",
+    "Visit the SEED MARKET to buy new crop varieties for your farm.",
+    "The TOOLS CENTER has everything from improved watering cans to axes.",
+    "You can sell your harvested crops for Gold at the SUPPLY HUB.",
+    "Check your WALLET frequently to see your earnings!",
+    "Explore the shops and click 'GO TO WORK' to return home."
+  ],
+  fishing: [
+    "Ready for some Fishing? This is a great way to earn extra gold.",
+    "Stand near the water and select your Fishing Rod from the BAG.",
+    "Cast your line and wait for the bobber to sink into the water.",
+    "CLICK quickly when the fish bites to reel it in!",
+    "Rare fish can be traded for premium rewards at the city hub.",
+    "Good luck, fisherman! Click 'LET'S GO' to start."
+  ],
+  garden: [
+    "Welcome to the Social Garden! A place to relax and meet others.",
+    "This area is perfect for hanging out with other Lifetopians.",
+    "Walk around the flower beds and enjoy the peaceful scenery.",
+    "Keep an eye out for special seasonal events in the pavilion.",
+    "The Garden is the heart of our community's social life.",
+    "Relax and enjoy! Click 'ENTER GARDEN' to join."
+  ],
+  suburban: [
+    "Welcome to the Suburban Area! A cozy neighborhood to explore.",
+    "Visit the local residents and see how they decorate their homes.",
+    "Look for hidden secrets and collectible items in the quiet corners.",
+    "This is the perfect place to find inspiration for your own farm.",
+    "Suburban life is quiet, but full of interesting stories.",
+    "Welcome home! Click 'START EXPLORING' to begin."
+  ]
+};
+
+const TOOL_IDS = TOOLS.map(t => t.id);
 
 export default function FarmingGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<GameState>(createInitialState());
   const animRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
-  const [displayState, setDisplayState] = useState<GameState>(stateRef.current);
+  const [ds, setDs] = useState<GameState>(stateRef.current);
   const [loaded, setLoaded] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+  const splashDoneRef = useRef(false);
+  useEffect(() => { splashDoneRef.current = splashDone; }, [splashDone]);
   const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [tutorialActive, setTutorialActive] = useState(false);
+  const [tutStep, setTutStep] = useState(0);
+  const [walletConnected, setWalletConnected] = useState(false);
+  const [walletAddress, setWalletAddress] = useState("");
+  const [walletType, setWalletType] = useState<'solana' | 'evm' | null>(null);
+  const [nfts, setNfts] = useState<string[]>([]);
+  const [phantomFound, setPhantomFound] = useState(false);
+  const [metamaskFound, setMetamaskFound] = useState(false);
 
-  useEffect(() => {
-    preloadAssets().then(() => setLoaded(true)).catch(() => setLoaded(true));
+  useEffect(() => { 
+    preloadAssets().then(() => setLoaded(true)).catch(() => setLoaded(true)); 
   }, []);
 
+  const closePanel = useCallback(() => setActivePanel(null), []);
+
+  const doSwitchMap = useCallback((map: MapType) => {
+    stateRef.current = switchMap(stateRef.current, map);
+    setDs(prev => ({ ...prev, currentMap: map }));
+    // Show map-specific instructions when switching
+    if (map !== 'home' || !ds.demoMode) {
+      setTutStep(0);
+      setTutorialActive(true);
+    }
+  }, [ds.demoMode]);
+
+  const handleSplashSelect = useCallback((map: MapType) => {
+    doSwitchMap(map);
+    setSplashDone(true);
+  }, [doSwitchMap]);
+
+  // Detect wallets on mount
   useEffect(() => {
-    const TOOL_ORDER = ['shovel', 'seed', 'tomato', 'water', 'axe', 'hoe', 'celurit', 'play'];
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const check = () => {
+      setPhantomFound(!!(window as any).phantom?.solana?.isPhantom || !!(window as any).solana?.isPhantom);
+      const eth = (window as any).ethereum;
+      setMetamaskFound(!!(eth?.isMetaMask && !eth?.isPhantom));
+    };
+    check();
+    const t = setTimeout(check, 1000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const connectPhantom = async () => {
+    console.log('[Phantom] window.phantom:', (window as any).phantom);
+    console.log('[Phantom] window.solana:', (window as any).solana);
+    try {
+      const sol = (window as any).phantom?.solana ?? (window as any).solana;
+      console.log('[Phantom] sol object:', sol);
+      console.log('[Phantom] isPhantom:', sol?.isPhantom);
+      if (!sol?.isPhantom) {
+        alert('Phantom tidak terdeteksi! Pastikan extension aktif dan halaman sudah di-refresh.');
+        window.open('https://phantom.app', '_blank');
+        return;
+      }
+      console.log('[Phantom] Calling connect...');
+      const res = await sol.connect({ onlyIfTrusted: false });
+      if (!res || !res.publicKey) throw new Error("Connection failed: No public key");
+      const addr = res.publicKey.toString();
+      setWalletAddress(addr);
+      setWalletType('solana');
+      setWalletConnected(true);
+      localStorage.setItem('wallet_addr', addr);
+      localStorage.setItem('wallet_type', 'solana');
+      stateRef.current.player.walletAddress = addr;
+      stateRef.current.notification = { text: 'PHANTOM CONNECTED!', life: 120 };
+      setDs({...stateRef.current});
+      setTutorialActive(true);
+      setTutStep(0);
+      loadProgress(addr);
+      saveProgress(); 
+    } catch (e: any) {
+      console.error('[Phantom] Error:', e);
+      stateRef.current.notification = { text: (e?.message || 'CONNECT FAILED').toUpperCase().slice(0,40), life: 120 };
+      setDs({...stateRef.current});
+    }
+  };
+
+  const connectMetaMask = async () => {
+    try {
+      const eth = (window as any).ethereum;
+      if (!eth) { window.open('https://metamask.io', '_blank'); return; }
+      const accounts = await eth.request({ method: 'eth_requestAccounts' });
+      const addr = accounts[0];
+      setWalletAddress(addr);
+      setWalletType('evm');
+      setWalletConnected(true);
+      localStorage.setItem('wallet_addr', addr);
+      localStorage.setItem('wallet_type', 'evm');
+      stateRef.current.player.walletAddress = addr;
+      stateRef.current.notification = { text: 'METAMASK CONNECTED!', life: 120 };
+      setDs({...stateRef.current});
+      setTutorialActive(true);
+      setTutStep(0);
+      loadProgress(addr);
+      saveProgress(); 
+    } catch (e: any) {
+      stateRef.current.notification = { text: (e?.message || 'CONNECT FAILED').toUpperCase().slice(0,40), life: 120 };
+      setDs({...stateRef.current});
+    }
+  };
+
+  const disconnectWallet = () => {
+    setWalletConnected(false);
+    setWalletAddress('');
+    setWalletType(null);
+    localStorage.removeItem('wallet_addr');
+    localStorage.removeItem('wallet_type');
+    stateRef.current.player.walletAddress = '';
+  };
+
+  // PERSISTENCE: Save/Load from Supabase
+  const loadProgress = async (addr: string) => {
+    try {
+      const { data, error } = await supabase.from('players').select('*').eq('wallet_address', addr).single();
+      if (data && !error) {
+        console.log("[Persistence] Loaded progress:", data);
+        stateRef.current.player.gold = data.gold;
+        stateRef.current.player.exp = data.exp;
+        stateRef.current.player.level = data.level;
+        stateRef.current.player.inventory = data.inventory || stateRef.current.player.inventory;
+        if (data.nfts && Array.isArray(data.nfts)) setNfts(data.nfts);
+        setDs({...stateRef.current});
+      }
+    } catch (e) { console.warn("[Persistence] No saved data found or load error:", e); }
+  };
+
+  const saveProgress = async () => {
+    const addr = stateRef.current.player.walletAddress;
+    if (!addr || addr.startsWith('guest')) return;
+    try {
+      await supabase.from('players').upsert({
+        wallet_address: addr,
+        gold: stateRef.current.player.gold,
+        exp: stateRef.current.player.exp,
+        level: stateRef.current.player.level,
+        inventory: stateRef.current.player.inventory,
+        nfts: nfts, // Sync current NFTs list
+        last_seen: new Date().toISOString()
+      }, { onConflict: 'wallet_address' });
+      console.log("[Persistence] Progress & NFTs synced to DB.");
+    } catch (e) {
+      console.error("[Persistence] Auto-save error:", e);
+    }
+  };
+
+  useEffect(() => {
+    const timer = setInterval(saveProgress, 10000); // More frequent auto-save (10s)
+    return () => clearInterval(timer);
+  }, [nfts]); // Recalibrate if NFTs change
+
+  // Auto-restore wallet dari localStorage
+  useEffect(() => {
+    const addr = localStorage.getItem('wallet_addr');
+    const type = localStorage.getItem('wallet_type');
+    if (addr) {
+      setWalletAddress(addr);
+      setWalletType(type === 'solana' ? 'solana' : 'evm');
+      setWalletConnected(true);
+      stateRef.current.player.walletAddress = addr;
+      loadProgress(addr);
+      // Ensure tutorial triggers on auto-restore for guidance
+      setTutorialActive(true);
+      setTutStep(0);
+    }
+  }, []);
+
+  const claimNFT = async () => {
+    const addr = walletAddress || localStorage.getItem('wallet_addr');
+    if (!addr) {
+      stateRef.current.notification = { text: 'CONNECT WALLET FIRST!', life: 120 };
+      setDs({...stateRef.current});
+      return;
+    }
+
+    // Show pending state
+    stateRef.current.notification = { text: 'CLAIMING TOKEN...', life: 300 };
+    setDs({...stateRef.current});
+
+    // Transfer 10 LFG token to user wallet
+    const result = await transferTokenToUser(addr, 10);
+
+    if (result.success) {
+      const newNft = `LFG Token Claim #${nfts.length + 1} | tx: ${result.txid?.slice(0,8)}...`;
+      const updatedNfts = [...nfts, newNft];
+      setNfts(updatedNfts);
+
+      // Refresh on-chain balance
+      const onChainBalance = await getTokenBalance(addr);
+      stateRef.current.player.lifetopiaGold = onChainBalance;
+      stateRef.current.notification = { text: `+10 LFG CLAIMED!`, life: 150 };
+      setDs({...stateRef.current});
+
+      // Save to Supabase
+      try {
+        await supabase.from('players').upsert({
+          wallet_address: addr,
+          nfts: updatedNfts,
+          gold: stateRef.current.player.gold,
+          exp: stateRef.current.player.exp,
+          level: stateRef.current.player.level,
+        }, { onConflict: 'wallet_address' });
+      } catch (e) {
+        console.error('[NFT] Supabase save failed:', e);
+      }
+    } else {
+      stateRef.current.notification = { text: result.error?.slice(0, 40).toUpperCase() || 'CLAIM FAILED', life: 150 };
+      setDs({...stateRef.current});
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       stateRef.current.keys.add(key);
+
       if (key === ' ' || key === 'e' || key === 'enter') {
-        stateRef.current = handleToolAction(stateRef.current);
+        if (stateRef.current.currentMap === 'city') setActivePanel('shop');
+        else stateRef.current = handleToolAction(stateRef.current);
       }
-      if (key === 'escape') {
-        stateRef.current.shopOpen = false;
-        stateRef.current.inventoryOpen = false;
-        stateRef.current.questsOpen = false;
-        setActivePanel(null);
-      }
-      if (key === '=' || key === '+') {
-        stateRef.current.targetZoom = Math.min(stateRef.current.targetZoom + 0.25, 3);
-      }
-      if (key === '-') {
-        stateRef.current.targetZoom = Math.max(stateRef.current.targetZoom - 0.25, 0.75);
-      }
-      const num = parseInt(e.key);
-      if (num >= 1 && num <= 8) {
-        const toolId = TOOL_ORDER[num - 1];
-        if (toolId === 'play') {
-          stateRef.current.player.speed = stateRef.current.player.speed === 3 ? 6 : 3;
-        } else {
-          stateRef.current.player.tool = toolId as GameState['player']['tool'];
-          setDisplayState(prev => ({ ...prev, player: { ...prev.player, tool: toolId as GameState['player']['tool'] } }));
-        }
-      }
+      if (key === 'escape') setActivePanel(null);
       if (key === 'tab') {
-        const mapOrder: MapType[] = ['home', 'city', 'fishing', 'garden'];
-        const idx = mapOrder.indexOf(stateRef.current.currentMap);
-        const nextMap = mapOrder[(idx + 1) % mapOrder.length];
-        switchMap(nextMap);
+        const order: MapType[] = ['home','city','fishing','garden','suburban'];
+        const next = order[(order.indexOf(stateRef.current.currentMap)+1)%5];
+        doSwitchMap(next);
       }
-      const navKeys = ['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' ','e','enter','tab'];
-      if (navKeys.includes(key) || (num >= 1 && num <= 8)) e.preventDefault();
+      if (key === 'shift') stateRef.current.player.running = true;
+      const nStr = e.key;
+      let n = parseInt(nStr);
+      if (nStr === '0') n = 10;
+      if (n >= 1 && n <= TOOL_IDS.length) {
+        const toolId = TOOL_IDS[n-1];
+        stateRef.current.player.tool = toolId as any;
+        setDs({...stateRef.current});
+      }
+      const consumed = ['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' ','e','enter','tab'];
+      if (consumed.includes(key)) e.preventDefault();
     };
-    const handleKeyUp = (e: KeyboardEvent) => {
+    const onKeyUp = (e: KeyboardEvent) => {
       stateRef.current.keys.delete(e.key.toLowerCase());
+      if (e.key === 'Shift') stateRef.current.player.running = false;
     };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, [doSwitchMap]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !loaded) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    const loop = (timestamp: number) => {
-      const dt = Math.min((timestamp - lastTimeRef.current) || 16, 32);
-      lastTimeRef.current = timestamp;
-
-      stateRef.current = updateGame(stateRef.current, dt);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      renderGame(ctx, stateRef.current, canvas.width, canvas.height);
-
-      if (Math.floor(timestamp / 100) !== Math.floor((timestamp - dt) / 100)) {
-        setDisplayState({ ...stateRef.current });
+    const loop = (ts: number) => {
+      const dt = Math.min((ts - (lastTimeRef.current||ts))||16, 32);
+      lastTimeRef.current = ts;
+      if (splashDoneRef.current) {
+        stateRef.current = updateGame(stateRef.current, dt);
+      }
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (loaded) renderGame(ctx, stateRef.current, canvas.width, canvas.height);
+      
+      // SYNC ACTIVE PANEL FOR DEMO
+      if (stateRef.current.activePanel !== activePanel) {
+        setActivePanel(stateRef.current.activePanel);
       }
 
+      if (Math.floor(ts/120) !== Math.floor((ts-dt)/120)) setDs({...stateRef.current});
       animRef.current = requestAnimationFrame(loop);
     };
     animRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animRef.current);
   }, [loaded]);
 
-  const selectTool = useCallback((toolId: string) => {
-    if (toolId === 'play') {
-      stateRef.current.player.speed = stateRef.current.player.speed === 3 ? 6 : 3;
+  // SUPABASE: Save/Load Sync
+  const selectTool = (toolId: string) => {
+    stateRef.current.player.tool = toolId as any;
+    // TUTORIAL: SELECT HOE
+    if (stateRef.current.player.tutorialStep === 1 && toolId === 'hoe') stateRef.current.player.tutorialStep = 2;
+    // TUTORIAL: SELECT PUPUK
+    if (stateRef.current.player.tutorialStep === 3 && toolId === 'fertilizer') stateRef.current.player.tutorialStep = 4;
+    // TUTORIAL: SELECT SEEDS
+    if (stateRef.current.player.tutorialStep === 5 && toolId.endsWith('-seed')) stateRef.current.player.tutorialStep = 6;
+    
+    setDs({...stateRef.current});
+  };
+  const [showTutorial, setShowTutorial] = useState(true);
+  
+  const onWheel = (e: React.WheelEvent) => {
+    stateRef.current.targetZoom = Math.max(0.8, Math.min(3, stateRef.current.targetZoom + (e.deltaY>0 ? -0.2:0.2)));
+    e.preventDefault();
+  };
+
+  const [savedGridInfo, setSavedGridInfo] = useState<string | null>(null);
+  const [isDraggingGrid, setIsDraggingGrid] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragStartScreen, setDragStartScreen] = useState({ x: 0, y: 0 });
+  const [dragCurrentScreen, setDragCurrentScreen] = useState({ x: 0, y: 0 });
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (activePanel !== 'grid-editor') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const tx = (e.clientX - rect.left) * scaleX + stateRef.current.cameraX;
+    const ty = (e.clientY - rect.top) * scaleY + stateRef.current.cameraY;
+    
+    setDragStart({ x: tx / stateRef.current.zoom, y: ty / stateRef.current.zoom });
+    setIsDraggingGrid(true);
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingGrid || activePanel !== 'grid-editor') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const tx = (e.clientX - rect.left) * scaleX + stateRef.current.cameraX;
+    const ty = (e.clientY - rect.top) * scaleY + stateRef.current.cameraY;
+    const currentX = tx / stateRef.current.zoom;
+    const currentY = ty / stateRef.current.zoom;
+
+    const x = Math.min(dragStart.x, currentX);
+    const y = Math.min(dragStart.y, currentY);
+    const w = Math.abs(currentX - dragStart.x);
+    const h = Math.abs(currentY - dragStart.y);
+
+    (FARM_GRID as any).startX = Math.floor(x);
+    (FARM_GRID as any).startY = Math.floor(y);
+    (FARM_GRID as any).cellW = Math.floor(w / FARM_GRID.cols);
+    (FARM_GRID as any).cellH = Math.floor(h / FARM_GRID.rows);
+    setDs({ ...stateRef.current });
+  };
+
+  const onMouseUp = () => {
+    if (isDraggingGrid) {
+      setIsDraggingGrid(false);
+      stateRef.current.notification = { text: "GRID AREA UPDATED!", life: 100 };
+      setDs({ ...stateRef.current });
+    }
+  };
+
+  const onClick = (e: React.MouseEvent) => {
+    if (isDraggingGrid || activePanel === 'grid-editor') return; 
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+
+    // Always process click-to-move on all maps
+    stateRef.current = handleToolAction(stateRef.current, mx, my);
+    setDs({...stateRef.current});
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (activePanel) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mx = (touch.clientX - rect.left) * scaleX;
+    const my = (touch.clientY - rect.top) * scaleY;
+    stateRef.current = handleToolAction(stateRef.current, mx, my);
+    setDs({...stateRef.current});
+  };
+
+  const buyItem = (id: string, price: number) => {
+    const s = stateRef.current;
+    if (s.player.gold < price) {
+      stateRef.current.notification = { text: '❌ Not enough GOLD!', life: 80 };
+      setDs({...stateRef.current});
       return;
     }
-    stateRef.current.player.tool = toolId as GameState['player']['tool'];
-    setDisplayState(prev => ({ ...prev, player: { ...prev.player, tool: toolId as GameState['player']['tool'] } }));
-  }, []);
+    stateRef.current.player = { ...s.player, gold: s.player.gold - price, inventory: { ...s.player.inventory, [id]: (s.player.inventory[id]||0)+1 } };
+    spawnText(stateRef.current, s.player.x, s.player.y-40, `-${price}G`, '#FF8888');
+    setDs({ ...stateRef.current });
+  };
 
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    stateRef.current = handleToolAction(stateRef.current);
-  }, []);
-
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    const delta = e.deltaY > 0 ? -0.2 : 0.2;
-    stateRef.current.targetZoom = Math.max(0.75, Math.min(3, stateRef.current.targetZoom + delta));
-    e.preventDefault();
-  }, []);
-
-  const switchMap = useCallback((mapId: MapType) => {
-    stateRef.current.currentMap = mapId;
-    stateRef.current.cameraX = 0;
-    stateRef.current.cameraY = 0;
-    if (mapId === 'home') {
-      stateRef.current.player.x = 820;
-      stateRef.current.player.y = 480;
-    } else if (mapId === 'city') {
-      stateRef.current.player.x = 900;
-      stateRef.current.player.y = 350;
-    } else if (mapId === 'fishing') {
-      stateRef.current.player.x = 750;
-      stateRef.current.player.y = 400;
-    } else if (mapId === 'garden') {
-      stateRef.current.player.x = 800;
-      stateRef.current.player.y = 375;
-    }
-    setDisplayState(prev => ({ ...prev, currentMap: mapId }));
-  }, []);
-
-  const hpPercent = displayState.player.hp / displayState.player.maxHp;
+  const hpPct = ds.player.hp / ds.player.maxHp;
+  const mapLabels: Record<MapType, string> = { home: '🏡 FARM', city: '🏙️ CITY SHOPS', fishing: '🎣 FISHING SPOT', garden: '🌺 SOCIAL GARDEN', suburban: '🏡 SUBURBAN' };
 
   return (
-    <div className="game-wrapper">
+    <div style={{ position:'relative', width:1280, height:720, overflow:'hidden', background:'#000', margin:'0 auto' }}>
       <style>{`
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0a0a0a; overflow: hidden; }
-        .game-wrapper {
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        .gf { font-family: 'Press Start 2P', 'Courier New', monospace; }
+
+        .wood-panel {
+          background: linear-gradient(135deg, #CB9F68 0%, #A07844 100%);
+          border: 4px solid #5C4033;
+          border-radius: 12px;
+          box-shadow: inset 0 0 10px rgba(0,0,0,0.4), 4px 4px 0 rgba(0,0,0,0.5);
           position: relative;
-          width: 1280px;
-          height: 720px;
-          margin: 0 auto;
-          overflow: hidden;
-          font-family: 'Press Start 2P', 'Courier New', monospace;
         }
-        @media (max-width: 1280px) {
-          .game-wrapper {
-            transform-origin: top left;
-            transform: scale(calc(100vw / 1280));
-            width: 1280px;
-            height: 720px;
-          }
-        }
-        canvas { display: block; }
 
-        /* HUD */
-        .hud-left {
-          position: absolute;
-          top: 10px;
-          left: 10px;
-          width: 210px;
-          background: rgba(20, 12, 4, 0.88);
-          border: 3px solid #8B6914;
-          border-radius: 8px;
-          padding: 10px;
+        .gold-header {
+          background: linear-gradient(180deg, #D4AF37 0%, #B8860B 100%);
+          border: 2px solid #5C4033;
+          border-radius: 8px 8px 0 0;
+          padding: 8px 12px;
           color: #FFF;
-          font-size: 9px;
-          box-shadow: 0 0 15px rgba(139,105,20,0.5);
-        }
-        .hud-level { font-size: 12px; color: #FFD700; font-weight: bold; margin-bottom: 8px; }
-        .hp-bar-bg {
-          background: #3a1a1a; border: 1px solid #8B0000;
-          border-radius: 4px; height: 12px; margin-bottom: 6px; overflow: hidden;
-        }
-        .hp-bar-fill {
-          height: 100%; border-radius: 3px;
-          background: linear-gradient(90deg, #FF4444, #FF6666);
-          transition: width 0.3s;
-          box-shadow: 0 0 8px #FF4444;
-        }
-        .hp-text { color: #FF8888; font-size: 8px; margin-bottom: 8px; }
-        .exp-bar-bg {
-          background: #1a1a3a; border: 1px solid #00008B;
-          border-radius: 4px; height: 6px; margin-bottom: 8px; overflow: hidden;
-        }
-        .exp-bar-fill {
-          height: 100%; background: linear-gradient(90deg, #4444FF, #8888FF);
-          border-radius: 3px;
-        }
-
-        .quest-section { border-top: 1px solid #8B6914; padding-top: 8px; margin-top: 4px; }
-        .quest-label { color: #FFD700; font-size: 8px; margin-bottom: 4px; }
-        .quest-mode { color: #DEB887; font-size: 7px; margin-bottom: 6px; }
-        .quest-item { color: #FFF; font-size: 7px; margin-bottom: 3px; padding-left: 4px; line-height: 1.4; }
-        .quest-item.done { color: #90EE90; text-decoration: line-through; }
-
-        /* Top right buttons */
-        .hud-top-right {
-          position: absolute;
-          top: 10px;
-          right: 10px;
-          display: flex;
-          gap: 6px;
-          align-items: center;
-        }
-        .hud-btn {
-          background: linear-gradient(180deg, #C8A040 0%, #8B6914 100%);
-          border: 2px solid #4a3008;
-          color: #FFF;
-          font-family: inherit;
-          font-size: 8px;
-          padding: 6px 10px;
-          cursor: pointer;
-          border-radius: 6px;
-          box-shadow: 0 3px 0 #4a3008, inset 0 1px 0 rgba(255,255,255,0.3);
-          text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-          transition: all 0.1s;
-          white-space: nowrap;
-        }
-        .hud-btn:hover { background: linear-gradient(180deg, #E0B850 0%, #A07820 100%); transform: translateY(-1px); }
-        .hud-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #4a3008; }
-        .hud-btn.wallet { background: linear-gradient(180deg, #40A0C8 0%, #1460A0 100%); border-color: #0a3060; box-shadow: 0 3px 0 #0a3060, inset 0 1px 0 rgba(255,255,255,0.3); }
-        .hud-btn.claim { background: linear-gradient(180deg, #C84040 0%, #A01414 100%); border-color: #600a0a; box-shadow: 0 3px 0 #600a0a, inset 0 1px 0 rgba(255,255,255,0.3); }
-        .gold-display {
-          background: linear-gradient(180deg, #FFD700 0%, #C8A000 100%);
-          border: 2px solid #4a3008;
-          color: #3a2000;
-          font-family: inherit;
-          font-size: 9px;
-          font-weight: bold;
-          padding: 6px 10px;
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          box-shadow: 0 3px 0 #4a3008;
-        }
-        .settings-btn {
-          background: rgba(50,40,20,0.8);
-          border: 2px solid #8B6914;
-          color: #FFD700;
+          text-shadow: 1px 1.5px 0px rgba(0,0,0,0.8);
           font-size: 14px;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
         }
 
-        /* Bottom toolbar */
-        .toolbar {
-          position: absolute;
-          bottom: 10px;
-          left: 50%;
-          transform: translateX(-50%);
-          display: flex;
-          gap: 6px;
-          background: linear-gradient(180deg, #8B6914 0%, #5a4208 100%);
-          border: 3px solid #4a3008;
-          border-radius: 12px;
-          padding: 8px 10px;
-          box-shadow: 0 -2px 0 #C8A040 inset, 0 4px 12px rgba(0,0,0,0.6);
-        }
-        .tool-slot {
-          width: 58px;
-          height: 58px;
-          background: linear-gradient(180deg, #C8A040 0%, #8B6914 100%);
-          border: 2px solid #4a3008;
-          border-radius: 8px;
+        .wb {
+          font-family: 'Press Start 2P', 'Courier New', monospace;
+          background: linear-gradient(180deg, #CE9E64 0%, #8D5A32 100%);
+          border: 3px solid #5C4033;
+          border-radius: 999px;
+          color: #FFF5E0;
           cursor: pointer;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 2px;
-          font-family: inherit;
-          color: #FFF;
-          font-size: 7px;
-          box-shadow: 0 3px 0 #4a3008, inset 0 1px 0 rgba(255,255,255,0.2);
-          transition: all 0.1s;
+          box-shadow: 0 4px 0 #3a2212, inset 0 1px 1px rgba(255,255,255,0.45);
+          transition: all 0.08s ease;
+          padding: 8px 14px;
+          font-size: 8px;
+          text-shadow: 1px 1px 1px #000;
+        }
+        .wb:hover { background: linear-gradient(180deg, #D9B380 0%, #AD7D54 100%); transform: translateY(-2px); box-shadow: 0 6px 0 #3a2212; }
+        .wb:active { transform: translateY(2px); box-shadow: 0 2px 0 #3a2212; }
+        .wb.active { background: linear-gradient(180deg, #FFD700 0%, #C8A020 100%); color: #3E2723; box-shadow: 0 0 15px rgba(255,215,0,0.5); text-shadow:none; }
+
+        .hp-bar-bg { background: #3B2416; border: 2px solid #5C4033; border-radius: 6px; height: 18px; overflow: hidden; position: relative; }
+        .hp-bar-fill { height: 100%; background: linear-gradient(180deg, #7CF34B 0%, #4CAF50 100%); box-shadow: inset 0 0 4px rgba(255,255,255,0.4); transition: width 0.4s cubic-bezier(0.2, 0, 0, 1); }
+
+        .quest-strip { 
+          background: linear-gradient(180deg, #FFD700 0%, #C8A020 100%); 
+          margin-bottom: 5px; 
+          padding: 8px 10px; 
+          border-radius: 6px; 
+          font-size: 7px; 
+          color: #3E2723; 
+          border: 2px solid #5C4033;
+          box-shadow: 0 2px 0 rgba(0,0,0,0.3);
+          font-weight: bold;
+        }
+
+        .tray { 
+          background: linear-gradient(180deg, #A07844 0%, #7B502C 100%); 
+          padding: 12px 20px; 
+          border-radius: 50px; 
+          border: 4px solid #5C4033; 
+          box-shadow: 0 10px 0 rgba(0,0,0,0.5), inset 0 2px 8px rgba(255,255,255,0.25); 
+          display: flex; gap: 8px; 
+        }
+        .slot { 
+          width: 58px; height: 58px; 
+          background: linear-gradient(135deg, #8B5E3C 0%, #5E3A24 100%); 
+          border: 3px solid #4D2D18; 
+          border-radius: 50%; 
+          cursor: pointer; 
+          display: flex; flex-direction: column; align-items: center; justify-content: center; 
+          position: relative; transition: all 0.1s; 
+          box-shadow: inset 0 0 10px rgba(0,0,0,0.7), 0 3px 6px rgba(0,0,0,0.3); 
+        }
+        .slot:hover { transform: translateY(-5px) scale(1.05); border-color: #FFD700; box-shadow: 0 5px 15px rgba(255,215,0,0.3); }
+        .slot.active-tool { 
+          background: linear-gradient(135deg, #FFE4B5 0%, #D4AF37 100%); 
+          border-color: #FFF; 
+          box-shadow: 0 0 20px rgba(255,215,0,0.6), inset 0 0 5px #FFF; 
+        }
+        .tool-img { 
+          width: 40px; height: 40px; 
+          image-rendering: auto; object-fit: contain; 
+          filter: drop-shadow(2px 4px 4px rgba(0,0,0,0.6)); 
+        }
+        .slot-key { 
+          position: absolute; top: 6px; left: 50%; transform: translateX(-50%); 
+          font-size: 5px; color: #FFD700; font-weight:bold; 
+          text-shadow: 1px 1.5px 1px #000;
+        }
+
+        .logo-container {
+          position: absolute; top: 15px; left: 15px; z-index: 2000;
+          overflow: hidden; cursor: pointer; border-radius: 20px;
+        }
+        .logo-img {
+          height: 150px;
+          object-fit: contain;
+          filter: drop-shadow(4px 0 0 #FFF) drop-shadow(-4px 0 0 #FFF) drop-shadow(0 4px 0 #FFF) drop-shadow(0 -4px 0 #FFF) drop-shadow(0 20px 20px rgba(0,0,0,0.6));
           position: relative;
-          overflow: hidden;
         }
-        .tool-slot:hover { background: linear-gradient(180deg, #E0B850 0%, #A07820 100%); transform: translateY(-3px); }
-        .tool-slot:active { transform: translateY(1px); }
-        .tool-slot.active {
-          background: linear-gradient(180deg, #FFD700 0%, #C8A000 100%);
-          border-color: #FFD700;
-          box-shadow: 0 0 12px #FFD700, 0 3px 0 #8B6914, inset 0 1px 0 rgba(255,255,255,0.4);
+        .logo-container::after {
+          content: "";
+          position: absolute; top: -50%; left: -60%;
+          width: 25%; height: 200%;
+          background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.8) 50%, rgba(255,255,255,0) 100%);
+          transform: rotate(30deg);
+          animation: shine 4s infinite linear;
         }
-        .tool-slot img { width: 32px; height: 32px; object-fit: contain; image-rendering: pixelated; }
-        .tool-emoji { font-size: 24px; line-height: 1; }
-        .tool-key {
-          position: absolute;
-          top: 2px;
-          right: 3px;
-          font-size: 6px;
-          color: rgba(255,255,255,0.6);
+        @keyframes shine {
+          0% { left: -100%; }
+          30% { left: 150%; }
+          100% { left: 150%; }
         }
 
-        /* Map switcher */
-        .map-switcher {
-          position: absolute;
-          bottom: 10px;
-          right: 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
+        /* PREMIUM UNITY-STYLE SCROLLBAR */
+        .shop-scroll-area::-webkit-scrollbar { width: 10px; }
+        .shop-scroll-area::-webkit-scrollbar-track { background: #5C4033; border-radius: 10px; }
+        .shop-scroll-area::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #D4AF37 0%, #8B5E3C 100%); border: 2px solid #5C4033; border-radius: 10px; }
+        .shop-scroll-area::-webkit-scrollbar-thumb:hover { background: #FFD700; }
+        
+        @keyframes toolGlow {
+          0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.8); outline: 4px solid rgba(255,255,255,0); }
+          50% { box-shadow: 0 0 25px 15px rgba(255,255,255,0.5); outline: 6px solid #FFF; }
+          100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.8); outline: 4px solid rgba(255,255,255,0); }
         }
-        .map-btn {
-          background: linear-gradient(180deg, #4a4a4a 0%, #2a2a2a 100%);
-          border: 2px solid #8B6914;
-          color: #FFF;
-          font-family: inherit;
-          font-size: 8px;
-          padding: 5px 10px;
-          cursor: pointer;
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          box-shadow: 0 2px 0 #1a1a1a;
-          transition: all 0.1s;
-        }
-        .map-btn:hover { background: linear-gradient(180deg, #6a6a6a 0%, #4a4a4a 100%); }
-        .map-btn.active { background: linear-gradient(180deg, #C8A040 0%, #8B6914 100%); border-color: #FFD700; }
-
-        /* Notification */
-        .notification {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -120px);
-          background: rgba(0,0,0,0.85);
-          border: 2px solid #FFD700;
-          color: #FFD700;
-          font-family: inherit;
-          font-size: 11px;
-          padding: 8px 16px;
-          border-radius: 8px;
-          pointer-events: none;
-          text-align: center;
-          box-shadow: 0 0 20px rgba(255,215,0,0.4);
-          animation: notifFadeIn 0.2s ease;
-        }
-        @keyframes notifFadeIn { from { opacity: 0; transform: translate(-50%, -100px); } to { opacity: 1; transform: translate(-50%, -120px); } }
-
-        /* Hint bar */
-        .hint-bar {
-          position: absolute;
-          bottom: 90px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: rgba(0,0,0,0.65);
-          color: rgba(255,255,255,0.7);
-          font-size: 7px;
-          padding: 4px 12px;
-          border-radius: 20px;
-          white-space: nowrap;
-          font-family: inherit;
-          pointer-events: none;
-        }
-
-        /* Panel overlays */
-        .panel-overlay {
-          position: absolute;
-          inset: 0;
-          background: rgba(0,0,0,0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 50;
-        }
-        .panel {
-          background: linear-gradient(180deg, #2a1a06 0%, #1a0e04 100%);
-          border: 3px solid #8B6914;
-          border-radius: 12px;
-          padding: 20px;
-          min-width: 360px;
-          max-width: 480px;
-          color: #FFF;
-          font-family: inherit;
-          font-size: 9px;
-          box-shadow: 0 0 30px rgba(139,105,20,0.6);
-        }
-        .panel-title {
-          color: #FFD700;
-          font-size: 13px;
-          text-align: center;
-          margin-bottom: 16px;
-          text-shadow: 0 0 10px #FFD700;
-        }
-        .panel-close {
-          float: right;
-          background: #8B0000;
-          border: 1px solid #CC0000;
-          color: #FFF;
-          font-family: inherit;
-          font-size: 9px;
-          padding: 3px 8px;
-          cursor: pointer;
-          border-radius: 4px;
-        }
-        .quest-card {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid #8B6914;
-          border-radius: 6px;
-          padding: 8px 10px;
-          margin-bottom: 8px;
-        }
-        .quest-card.done { border-color: #4CAF50; opacity: 0.6; }
-        .quest-title { color: #FFD700; font-size: 9px; margin-bottom: 4px; }
-        .quest-desc { color: #DEB887; font-size: 7px; margin-bottom: 4px; }
-        .quest-progress { color: #90EE90; font-size: 7px; }
-        .quest-reward { float: right; color: #FFD700; }
-        .inv-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          margin-top: 12px;
-        }
-        .inv-slot {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid #8B6914;
-          border-radius: 6px;
-          padding: 8px;
-          text-align: center;
-        }
-        .inv-name { color: #DEB887; font-size: 7px; margin-bottom: 4px; }
-        .inv-count { color: #FFD700; font-size: 12px; }
-
-        /* Zoom indicator */
-        .zoom-indicator {
-          position: absolute;
-          bottom: 90px;
-          right: 10px;
-          background: rgba(0,0,0,0.6);
-          border: 1px solid #8B6914;
-          border-radius: 6px;
-          padding: 4px 8px;
-          color: #FFD700;
-          font-size: 8px;
-          font-family: inherit;
-        }
-
-        /* Loading */
-        .loading-screen {
-          position: absolute;
-          inset: 0;
-          background: #0a0a1a;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 16px;
-        }
-        .loading-title { color: #FFD700; font-family: inherit; font-size: 20px; text-shadow: 0 0 20px #FFD700; }
-        .loading-sub { color: #DEB887; font-family: inherit; font-size: 9px; }
-        .loading-spinner {
-          width: 40px; height: 40px;
-          border: 3px solid #4a3008;
-          border-top-color: #FFD700;
+        .glowing-tool {
+          animation: toolGlow 1.5s infinite;
+          z-index: 10000;
           border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Control hints */
-        .control-hint {
-          position: absolute;
-          bottom: 90px;
-          left: 10px;
-          color: rgba(255,255,255,0.5);
-          font-size: 7px;
-          font-family: inherit;
-          line-height: 1.7;
         }
       `}</style>
 
-      <canvas
-        ref={canvasRef}
-        width={1280}
-        height={720}
-        onClick={handleCanvasClick}
-        onWheel={handleWheel}
-        style={{ cursor: 'crosshair', display: 'block' }}
-      />
-
-      {!loaded && (
-        <div className="loading-screen">
-          <div className="loading-title">LIFETOPIA WORLD</div>
-          <div className="loading-spinner" />
-          <div className="loading-sub">Loading assets...</div>
+      {loaded && splashDone && (
+        <div className="logo-container">
+          <img src="/logo.png" alt="LIFETOPIA" className="logo-img" />
         </div>
       )}
 
-      {/* HUD Left Panel */}
-      <div className="hud-left">
-        <div className="hud-level">LVL {displayState.player.level}</div>
-        <div className="hp-bar-bg">
-          <div className="hp-bar-fill" style={{ width: `${hpPercent * 100}%` }} />
-        </div>
-        <div className="hp-text">HP {displayState.player.hp}/{displayState.player.maxHp}</div>
-        <div className="exp-bar-bg">
-          <div className="exp-bar-fill" style={{ width: `${(displayState.player.exp / displayState.player.maxExp) * 100}%` }} />
-        </div>
+      <canvas 
+        ref={canvasRef} 
+        width={1280} 
+        height={720} 
+        onClick={onClick} 
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onWheel={onWheel}
+        onTouchEnd={onTouchEnd}
+        style={{ display:'block', cursor: activePanel === 'grid-editor' ? 'cell' : 'crosshair', touchAction: 'none' }} 
+      />
 
-        <div className="quest-section">
-          <div className="quest-label">Classic</div>
-          <div className="quest-mode">Reach Level: {displayState.player.level + 1}</div>
-          <div className="quest-mode">Earn {displayState.player.level * 150} GOLD</div>
-          <div style={{ color: '#FFD700', fontSize: '7px', marginBottom: '4px', marginTop: '4px' }}>SEASONAL QUESTS</div>
-          {displayState.quests.slice(0, 4).map(q => (
-            <div key={q.id} className={`quest-item ${q.completed ? 'done' : ''}`}>
-              {q.title}: ({Math.min(q.current, q.target)}/{q.target})
-            </div>
+      {!splashDone && (
+        <SplashScreen onSelectMap={handleSplashSelect} />
+      )}
+
+
+      {splashDone && (
+        <div style={{ position:'absolute', top:20, right:20, display:'flex', gap:8, alignItems:'center' }}>
+          <div className="wb gf" style={{ color: '#FFE4B5', padding:'6px 15px', pointerEvents:'none' }}>LVL {ds.player.level}</div>
+          <button className="wb gf" onClick={() => setActivePanel('wallet')}>WALLET</button>
+          <button className="wb gf" onClick={() => setActivePanel('quests')}>TASKS</button>
+          <button className="wb gf" onClick={() => setActivePanel('inventory')}>ITEMS</button>
+          <button className="wb gf" onClick={() => setActivePanel('nft')}>MY NFTS</button>
+          <div className="wb gf" style={{ color: '#FFD700', pointerEvents:'none' }}>G {ds.player.gold}</div>
+          <div className="wb gf" style={{ color: '#00BFFF', pointerEvents:'none' }}>{ds.player.lifetopiaGold} LFG</div>
+          <button className="wb gf" style={{ fontSize:14, padding:'6px 10px' }} onClick={() => setActivePanel('settings')}>⚙</button>
+        </div>
+      )}
+
+      {/* BOTTOM CENTER TOOLS */}
+      <div style={{ position:'absolute', bottom:25, left:'50%', transform:'translateX(-50%)' }}>
+        {ds.currentMap === 'home' && (
+          <div className="tray" style={{ pointerEvents: (tutorialActive || ds.demoMode) ? 'none' : 'auto', opacity: (tutorialActive || ds.demoMode) ? 0.7 : 1 }}>
+            {TOOLS.map((t, i) => {
+              const matchesStep = tutorialActive && (
+                                  (tutStep === 1 && t.id === 'sickle') || 
+                                  (tutStep === 2 && (t.id === 'seed' || t.id.includes('seed'))) || 
+                                  (tutStep === 3 && t.id === 'water') || 
+                                  (tutStep === 4 && t.id === 'axe')
+              );
+              return (
+                <div key={t.id} className={`slot ${ds.player.tool === t.id ? 'active-tool' : ''} ${matchesStep ? 'glowing-tool' : ''}`} onClick={() => selectTool(t.id)}>
+                  <span className="slot-key">{i+1}</span>
+                  {t.img.startsWith('/') ? (
+                     <img src={t.img} className="tool-img" alt={t.label} />
+                  ) : (
+                     <div style={{ fontSize:24 }}>{t.img}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* SELECT MAP - RE-POSITIONED BELOW SETTINGS (TOP RIGHT) */}
+      <div className="wood-panel" style={{ position:'absolute', top:85, right:20, padding:'12px', width:180, zIndex:100 }}>
+        <div className="gf" style={{ fontSize:8, marginBottom:10, textAlign:'center', color:'#5C4033' }}>SELECT MAP</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {MAPS.map(m => (
+            <button key={m.id} className={`wb gf ${ds.currentMap===m.id ? 'active' : ''}`} style={{ fontSize:9, width:'100%', textAlign:'center', padding:'8px' }} onClick={() => doSwitchMap(m.id)}>
+              {m.label.toUpperCase()}
+            </button>
           ))}
         </div>
       </div>
 
-      {/* Top Right Buttons */}
-      <div className="hud-top-right">
-        <button className="hud-btn wallet" onClick={() => setActivePanel('wallet')}>OPTIONAL WALLET</button>
-        <button className="hud-btn" onClick={() => setActivePanel('quests')}>QUESTS</button>
-        <button className="hud-btn" onClick={() => setActivePanel('inventory')}>ITEM</button>
-        <button className="hud-btn claim" onClick={() => setActivePanel('nft')}>CLAIM NFT</button>
-        <div className="gold-display">G {displayState.player.gold}</div>
-        <button className="settings-btn" onClick={() => setActivePanel('settings')}>⚙</button>
-      </div>
-
-      {/* Bottom Toolbar */}
-      <div className="toolbar">
-        {TOOLS.map((tool, i) => (
-          <div
-            key={tool.id}
-            className={`tool-slot ${displayState.player.tool === tool.id ? 'active' : ''}`}
-            onClick={() => selectTool(tool.id)}
-            title={tool.label}
-          >
-            <span className="tool-key">{i + 1}</span>
-            {tool.icon ? (
-              <img src={tool.icon} alt={tool.label} />
-            ) : (
-              <span className="tool-emoji">{tool.emoji}</span>
-            )}
-            <span style={{ fontSize: '6px' }}>{tool.label}</span>
+      {/* POP-UPS */}
+      {activePanel && (
+        <div className="panel-overlay" style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2000 }}>
+          <div className="wood-panel" style={{ padding:12, minWidth:260, maxWidth:360 }}>
+            <div className="gold-header gf" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:12 }}>
+              <span>{activePanel.toUpperCase()}</span>
+              <button className="wb" style={{ padding:'3px 8px', fontSize:8 }} onClick={closePanel}>X</button>
+            </div>
+            <div style={{ padding:14, color:'#4D2D18' }} className="gf">
+               {activePanel === 'wallet' && (
+                 <div style={{ textAlign:'center' }}>
+                   {walletConnected ? (
+                     <>
+                       <div style={{ color:'#4CAF50', fontSize:9, marginBottom:10 }}>CONNECTED</div>
+                       <div style={{ background:'rgba(0,0,0,0.3)', padding:'8px', borderRadius:6, fontSize:6, wordBreak:'break-all', color:'#FFE4B5', marginBottom:10 }}>
+                         {walletAddress}
+                       </div>
+                       <div style={{ color:'#00BFFF', fontSize:10, marginBottom:12 }}>{ds.player.lifetopiaGold} LFG</div>
+                       {walletType === 'solana' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+                            <button className="wb gf" style={{ width:'100%', fontSize:7, padding:'10px', background:'linear-gradient(180deg, #14F195, #00A3FF)', border:'2px solid #00A3FF' }} 
+                              onClick={async () => {
+                                const res = await initializeTokenAccount();
+                                if (res.success) stateRef.current.notification = { text: 'INITIALIZED SAVED ON SOLSCAN', life: 200 };
+                                else stateRef.current.notification = { text: (res.error || 'INIT FAILED').toUpperCase().slice(0, 40), life: 150 };
+                                setDs({...stateRef.current});
+                              }}>
+                              INITIALIZE TOKEN ACCOUNT
+                            </button>
+                            <a href={`https://explorer.solana.com/address/${walletAddress}`} target="_blank" rel="noopener noreferrer" style={{ display:'block' }}>
+                              <button className="wb gf" style={{ width:'100%', fontSize:7, padding:'10px', background:'linear-gradient(180deg, #9945FF, #6B2FBF)', border:'2px solid #7B3FDF' }}>
+                                VIEW ON SOLANA EXPLORER
+                              </button>
+                            </a>
+                          </div>
+                        )}
+                       {walletType === 'evm' && (
+                         <a href={`https://etherscan.io/address/${walletAddress}`} target="_blank" rel="noopener noreferrer" style={{ display:'block', marginBottom:8 }}>
+                           <button className="wb gf" style={{ width:'100%', fontSize:7, padding:'10px', background:'linear-gradient(180deg, #627EEA, #3B5BD9)', border:'2px solid #4A6FD9' }}>
+                             VIEW ON ETHERSCAN
+                           </button>
+                         </a>
+                       )}
+                       <button className="wb gf" style={{ width:'100%', fontSize:6, padding:'8px', marginTop:4 }} onClick={disconnectWallet}>DISCONNECT</button>
+                     </>
+                   ) : (
+                     <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                       <div style={{ fontSize:8, color:'#5C4033', marginBottom:4 }}>SELECT WALLET</div>
+                       <button className="wb gf" onClick={connectPhantom} style={{ fontSize:9, padding:'16px', background: phantomFound ? 'linear-gradient(180deg, #ab9ff2, #512da8)' : 'linear-gradient(180deg, #888, #555)' }}>
+                         {phantomFound ? 'CONNECT PHANTOM' : 'INSTALL PHANTOM'}
+                       </button>
+                       <button className="wb gf" onClick={connectMetaMask} style={{ fontSize:9, padding:'16px', background: metamaskFound ? 'linear-gradient(180deg, #f6851b, #be630a)' : 'linear-gradient(180deg, #888, #555)' }}>
+                         {metamaskFound ? 'CONNECT METAMASK' : 'INSTALL METAMASK'}
+                       </button>
+                     </div>
+                   )}
+                 </div>
+               )}
+               {activePanel === 'quests' && (
+                 <div>
+                   {ds.quests.map(q => (
+                     <div key={q.id} style={{ borderBottom:'1px solid #8B5E3C', padding:'6px 0', fontSize:6 }}>
+                       {q.completed ? '✅' : '⏳'} {q.title} ({q.current}/{q.target})
+                      </div>
+                    ))}
+                  </div>
+               )}
+               {activePanel === 'inventory' && (
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8, maxHeight:280, overflowY:'auto', padding:'4px' }}>
+                    {Array.from({ length: 12 }).map((_, i) => {
+                      const items = Object.entries(ds.player.inventory);
+                      const item = items[i];
+                      return (
+                        <div key={i} className="slot" style={{ width:58, height:58, border:'2px solid #5C4033' }}>
+                          {item && item[1] > 0 ? (
+                            <div style={{ textAlign:'center' }}>
+                              <div style={{ fontSize:5, color:'#FFE4B5' }}>{item[0].toUpperCase()}</div>
+                              <div style={{ fontSize:8, color:'#FFD700' }}>x{item[1]}</div>
+                            </div>
+                          ) : <div style={{ opacity:0.1, fontSize:10 }}></div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+               {activePanel === 'nft' && (
+                 <div style={{ textAlign:'center' }}>
+                   {nfts.length > 0 ? (
+                     <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                       {nfts.map((n, i) => {
+                         const addr = walletAddress || localStorage.getItem('wallet_addr') || '';
+                         const solscanUrl = addr ? `https://solscan.io/account/${addr}` : null;
+                         return (
+                           <div key={i} style={{ background:'#D4AF37', borderRadius:12, overflow:'hidden', border:'2px solid #B8860B' }}>
+                             <div style={{ color:'#3E2723', padding:'8px 10px', fontSize:6 }}>{n}</div>
+                             {solscanUrl ? (
+                               <a href={solscanUrl} target="_blank" rel="noopener noreferrer" style={{ display:'block', textDecoration:'none' }}>
+                                 <div style={{ background:'linear-gradient(180deg, #1a1a2e, #16213e)', borderTop:'2px solid #B8860B', padding:'8px 10px', display:'flex', alignItems:'center', justifyContent:'space-between', cursor:'pointer', gap:6 }}>
+                                   <span style={{ fontFamily:"'Press Start 2P', monospace", fontSize:6, color:'#9945FF' }}>
+                                     solscan.io/account/{addr.slice(0,6)}...{addr.slice(-4)}
+                                   </span>
+                                   <span style={{ fontFamily:"'Press Start 2P', monospace", fontSize:6, color:'#FFD700', whiteSpace:'nowrap' }}>
+                                     CLICK TO TRACK →
+                                   </span>
+                                 </div>
+                               </a>
+                             ) : (
+                               <div style={{ background:'#333', borderTop:'2px solid #B8860B', padding:'8px 10px', fontSize:6, color:'#888', fontFamily:"'Press Start 2P', monospace" }}>
+                                 CONNECT WALLET TO TRACK
+                               </div>
+                             )}
+                           </div>
+                         );
+                       })}
+                     </div>
+                   ) : <div style={{ fontSize:8, color: '#5C4033' }}>NO NFTS DETECTED</div>}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                      <button className="wb gf" onClick={async () => {
+                         const res = await initializeTokenAccount();
+                         if (res.success) stateRef.current.notification = { text: 'INITIALIZED ON SOLSCAN', life: 200 };
+                         else stateRef.current.notification = { text: (res.error || 'INIT FAILED').toUpperCase().slice(0, 40), life: 150 };
+                         setDs({...stateRef.current});
+                      }} style={{ flex: 1, fontSize: 8 }}>INITIALIZE ACCOUNT</button>
+                      <button className="wb gf" onClick={claimNFT} style={{ flex: 1, fontSize: 8 }}>CLAIM ALPHA NFT</button>
+                    </div>
+                 </div>
+               )}
+               {activePanel === 'shop' && (
+                 <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:10, maxHeight:320, overflowY:'auto', padding:'4px' }}>
+                   {SHOP_ITEMS.map(item => (
+                     <div key={item.id} className="wood-panel" style={{ padding:'12px', display:'flex', flexDirection:'column', alignItems:'center', background:'#8B5E3C', border:'3px solid #5C4033', borderRadius:'15px' }}>
+                        <div className="gf" style={{ fontSize:7, color:'#FFD700', marginBottom:5 }}>{item.name.toUpperCase()}</div>
+                        <div className="slot" style={{ width:50, height:50, margin:'5px 0' }}></div>
+                        <div className="gf" style={{ fontSize:6, color:'#FFF', margin:'8px 0' }}>{item.price} GOLD</div>
+                        <button className="wb gf" style={{ width:'100%', fontSize:6, padding:'8px 0' }} onClick={() => buyItem(item.id, item.price)}>BUY (1)</button>
+                     </div>
+                   ))}
+                   {Array.from({ length: Math.max(0, 4 - SHOP_ITEMS.length) }).map((_, i) => (
+                     <div key={i} className="slot" style={{ width: '100%', height: 100, opacity: 0.1 }} />
+                    ))}
+                  </div>
+               )}
+               {activePanel === 'settings' && (
+                 <div style={{ fontSize:7 }}>
+                   <div>MUSIC: ON</div>
+                   <div>SFX: ON</div>
+                   <div>V.0.9.5</div>
+                  </div>
+               )}
+            </div>
           </div>
-        ))}
-      </div>
-
-      {/* Map Switcher */}
-      <div className="map-switcher">
-        {MAPS.map(m => (
-          <button
-            key={m.id}
-            className={`map-btn ${displayState.currentMap === m.id ? 'active' : ''}`}
-            onClick={() => switchMap(m.id)}
-          >
-            {m.icon} {m.label}
+        </div>
+      )}
+      {/* FARM AREA VISUAL EDITOR — drag rectangle on canvas to set farm zone */}
+      {ds.currentMap === 'home' && (
+        <div style={{ position:'absolute', bottom: 100, right: 20, zIndex: 1000 }}>
+          <button className="wb gf" onClick={() => setActivePanel(activePanel === 'farm-area-editor' ? null : 'farm-area-editor')}
+            style={{ color: activePanel === 'farm-area-editor' ? '#FFD700' : '#FFF5E0', fontSize: 7, padding: '6px 10px' }}>
+            {activePanel === 'farm-area-editor' ? '✅ DONE' : '🌱 SET FARM AREA'}
           </button>
-        ))}
-      </div>
-
-      {/* Zoom indicator */}
-      <div className="zoom-indicator">
-        🔍 {Math.round(displayState.zoom * 100)}%
-        <div style={{ fontSize: '6px', marginTop: '2px', color: '#DEB887' }}>Scroll / ±</div>
-      </div>
-
-      {/* Hint bar */}
-      <div className="hint-bar">
-        WASD: Move | E/Space/Click: Use Tool | Scroll: Zoom | 1-8: Tools | Tab: Map
-      </div>
-
-      {/* Control hint bottom left */}
-      <div className="control-hint">
-        <div>🪣 Shovel: Till/Harvest</div>
-        <div>🌱 Seeds: Plant wheat</div>
-        <div>🍅 Tomato: Plant tomato</div>
-        <div>💧 Water: Water crops</div>
-        <div>🪓 Axe: Chop trees</div>
-      </div>
-
-      {/* Notification */}
-      {displayState.notification && (
-        <div className="notification" style={{ opacity: Math.min(displayState.notification.life / 30, 1) }}>
-          {displayState.notification.text}
         </div>
       )}
 
-      {/* Panel Overlays */}
-      {activePanel && (
-        <div className="panel-overlay" onClick={(e) => { if (e.target === e.currentTarget) setActivePanel(null); }}>
-          {activePanel === 'quests' && (
-            <div className="panel">
-              <button className="panel-close" onClick={() => setActivePanel(null)}>✕ CLOSE</button>
-              <div className="panel-title">📋 QUESTS</div>
-              {displayState.quests.map(q => (
-                <div key={q.id} className={`quest-card ${q.completed ? 'done' : ''}`}>
-                  <div className="quest-title">{q.completed ? '✅' : '📌'} {q.title}</div>
-                  <div className="quest-desc">{q.description}</div>
-                  <div className="quest-progress">
-                    Progress: {Math.min(q.current, q.target)}/{q.target}
-                    <span className="quest-reward">🪙 {q.reward} GOLD</span>
-                  </div>
-                  {!q.completed && (
-                    <div style={{ marginTop: '4px', background: '#1a1a1a', borderRadius: '4px', height: '6px', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.min(q.current / q.target, 1) * 100}%`, background: '#FFD700' }} />
-                    </div>
-                  )}
-                </div>
-              ))}
+      {activePanel === 'farm-area-editor' && (
+        <>
+          {/* Full-screen drag capture layer */}
+          <div
+            style={{ position:'absolute', inset:0, zIndex:2000, cursor:'crosshair' }}
+            onMouseDown={(e) => {
+              const canvas = canvasRef.current;
+              if (!canvas) return;
+              const rect = canvas.getBoundingClientRect();
+              const scaleX = canvas.width / rect.width;
+              const scaleY = canvas.height / rect.height;
+              const sx = e.clientX - rect.left;
+              const sy = e.clientY - rect.top;
+              const wx = (sx * scaleX + stateRef.current.cameraX) / stateRef.current.zoom;
+              const wy = (sy * scaleY + stateRef.current.cameraY) / stateRef.current.zoom;
+              setDragStart({ x: wx, y: wy });
+              setDragStartScreen({ x: e.clientX, y: e.clientY });
+              setDragCurrentScreen({ x: e.clientX, y: e.clientY });
+              setIsDraggingGrid(true);
+            }}
+            onMouseMove={(e) => {
+              if (!isDraggingGrid) return;
+              setDragCurrentScreen({ x: e.clientX, y: e.clientY });
+              const canvas = canvasRef.current;
+              if (!canvas) return;
+              const rect = canvas.getBoundingClientRect();
+              const scaleX = canvas.width / rect.width;
+              const scaleY = canvas.height / rect.height;
+              const wx = ((e.clientX - rect.left) * scaleX + stateRef.current.cameraX) / stateRef.current.zoom;
+              const wy = ((e.clientY - rect.top) * scaleY + stateRef.current.cameraY) / stateRef.current.zoom;
+              const x = Math.min(dragStart.x, wx);
+              const y = Math.min(dragStart.y, wy);
+              const w = Math.abs(wx - dragStart.x);
+              const h = Math.abs(wy - dragStart.y);
+              const cols = Math.max(1, Math.round(w / 80));
+              const rows = Math.max(1, Math.round(h / 70));
+              (FARM_GRID as any).startX = Math.round(x);
+              (FARM_GRID as any).startY = Math.round(y);
+              (FARM_GRID as any).cols = cols;
+              (FARM_GRID as any).rows = rows;
+              (FARM_GRID as any).cellW = Math.round(w / cols);
+              (FARM_GRID as any).cellH = Math.round(h / rows);
+              setDs({ ...stateRef.current });
+            }}
+            onMouseUp={() => {
+              if (!isDraggingGrid) return;
+              setIsDraggingGrid(false);
+              // Preview stays visible, user clicks SAVE button to confirm
+              setDs({ ...stateRef.current });
+            }}
+          />
+
+          {/* Instruction hint */}
+          {!isDraggingGrid && (
+            <div style={{
+              position:'absolute', bottom: 160, left:'50%', transform:'translateX(-50%)',
+              zIndex:2001, textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center', gap:12,
+            }}>
+              <div className="wb gf" style={{
+                fontSize:10, padding:'12px 24px',
+                background:'rgba(30,15,5,0.93)', border:'3px solid #FFD700',
+                color:'#FFD700', boxShadow:'0 8px 32px rgba(0,0,0,0.9)',
+                pointerEvents:'none',
+              }}>
+                KLIK & DRAG DI AREA TANAH
+              </div>
+
+              {/* SAVE button — only show after a drag has been done */}
+              {FARM_GRID.cols > 0 && FARM_GRID.cellW > 0 && (
+                <button className="wb gf" style={{
+                  fontSize:11, padding:'12px 32px',
+                  background:'linear-gradient(180deg,#4CAF50,#2E7D32)',
+                  border:'3px solid #1B5E20',
+                  color:'#FFF', boxShadow:'0 6px 0 #1B5E20, 0 8px 24px rgba(0,0,0,0.7)',
+                  cursor:'pointer',
+                }}
+                onClick={() => {
+                  const { cols, rows, cellW, cellH, startX, startY } = FARM_GRID;
+                  // Validate before saving
+                  if (cellW < 10 || cellH < 10 || cols < 1 || rows < 1) {
+                    stateRef.current.notification = { text: 'DRAG LEBIH BESAR!', life: 100 };
+                    setDs({ ...stateRef.current });
+                    return;
+                  }
+                  const newPlots: any[] = [];
+                  for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                      newPlots.push({
+                        id: `plot-${r}-${c}`,
+                        gridX: c, gridY: r,
+                        worldX: startX + c * cellW,
+                        worldY: startY + r * cellH,
+                        tilled: false, watered: false, fertilized: false, crop: null,
+                      });
+                    }
+                  }
+                  stateRef.current.farmPlots = newPlots;
+                  localStorage.setItem('farm_grid', JSON.stringify({ cols, rows, cellW, cellH, startX, startY }));
+                  stateRef.current.notification = { text: `✅ FARM SAVED: ${cols}x${rows} PLOTS`, life: 150 };
+                  setSavedGridInfo(`startX:${startX} startY:${startY} cellW:${cellW} cellH:${cellH} cols:${cols} rows:${rows}`);
+                  setDs({ ...stateRef.current });
+                  setActivePanel(null);
+                }}>
+                  💾 SAVE FARM AREA
+                </button>
+              )}
             </div>
           )}
-          {activePanel === 'inventory' && (
-            <div className="panel">
-              <button className="panel-close" onClick={() => setActivePanel(null)}>✕ CLOSE</button>
-              <div className="panel-title">🎒 INVENTORY</div>
-              <div style={{ color: '#DEB887', marginBottom: '8px' }}>Gold: {displayState.player.gold} G</div>
-              <div className="inv-grid">
-                {Object.entries(displayState.player.inventory).map(([key, val]) => (
-                  <div key={key} className="inv-slot">
-                    <div className="inv-name">{key.replace('-', ' ')}</div>
-                    <div className="inv-count">{val}</div>
-                  </div>
+
+          {/* Live rectangle preview in screen space */}
+          {isDraggingGrid && (() => {
+            const x = Math.min(dragStartScreen.x, dragCurrentScreen.x);
+            const y = Math.min(dragStartScreen.y, dragCurrentScreen.y);
+            const w = Math.abs(dragCurrentScreen.x - dragStartScreen.x);
+            const h = Math.abs(dragCurrentScreen.y - dragStartScreen.y);
+            return (
+              <div style={{
+                position:'fixed', left: x, top: y, width: w, height: h,
+                border: '3px dashed #FFD700',
+                background: 'rgba(255,215,0,0.12)',
+                boxShadow: '0 0 0 2px rgba(255,215,0,0.4), inset 0 0 20px rgba(255,215,0,0.08)',
+                pointerEvents:'none', zIndex:2002,
+              }}>
+                {/* Corner markers */}
+                {[[0,0],[w-8,0],[0,h-8],[w-8,h-8]].map(([cx,cy],i) => (
+                  <div key={i} style={{
+                    position:'absolute', left:cx, top:cy,
+                    width:8, height:8,
+                    background:'#FFD700',
+                    boxShadow:'0 0 6px #FFD700',
+                  }}/>
                 ))}
-              </div>
-            </div>
-          )}
-          {activePanel === 'wallet' && (
-            <div className="panel">
-              <button className="panel-close" onClick={() => setActivePanel(null)}>✕ CLOSE</button>
-              <div className="panel-title">👛 WALLET</div>
-              <div style={{ color: '#DEB887', textAlign: 'center', padding: '20px 0' }}>
-                <div style={{ fontSize: '24px', marginBottom: '12px' }}>💰</div>
-                <div>Solana Devnet Integration</div>
-                <div style={{ marginTop: '12px', color: '#90EE90' }}>Gold Balance: {displayState.player.gold} G</div>
-                <div style={{ marginTop: '8px', fontSize: '7px', color: '#888' }}>Wallet connect available in full release</div>
-              </div>
-            </div>
-          )}
-          {activePanel === 'nft' && (
-            <div className="panel">
-              <button className="panel-close" onClick={() => setActivePanel(null)}>✕ CLOSE</button>
-              <div className="panel-title">🏆 CLAIM NFT</div>
-              <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                <div style={{ fontSize: '32px', marginBottom: '12px' }}>🎖️</div>
-                <div style={{ color: '#FFD700', marginBottom: '8px' }}>Alpha Tester NFT</div>
-                <div style={{ color: '#DEB887', fontSize: '7px', marginBottom: '16px' }}>Complete quests to unlock NFT rewards!</div>
-                <div style={{ color: '#90EE90', fontSize: '7px' }}>
-                  Quests done: {displayState.quests.filter(q => q.completed).length}/{displayState.quests.length}
-                </div>
-                {displayState.quests.filter(q => q.completed).length >= 3 && (
-                  <button style={{
-                    marginTop: '12px',
-                    background: 'linear-gradient(180deg, #FFD700, #C8A000)',
-                    border: '2px solid #8B6914',
-                    borderRadius: '6px',
-                    color: '#3a2000',
-                    fontFamily: 'inherit',
-                    fontSize: '9px',
-                    padding: '8px 16px',
-                    cursor: 'pointer',
+                {/* Size label */}
+                {w > 60 && h > 30 && (
+                  <div style={{
+                    position:'absolute', top:'50%', left:'50%',
+                    transform:'translate(-50%,-50%)',
+                    fontFamily:"'Press Start 2P', monospace",
+                    fontSize:8, color:'#FFD700',
+                    textShadow:'0 0 8px #000, 1px 1px 0 #000',
+                    whiteSpace:'nowrap',
                   }}>
-                    CLAIM NFT (3 Quests Done!)
-                  </button>
+                    {FARM_GRID.cols}×{FARM_GRID.rows} PLOTS
+                  </div>
                 )}
               </div>
+            );
+          })()}
+        </>
+      )}
+
+      {/* PREMIUM STYLED NOTIFICATIONS (STYLED LIKE CONNECT WALLET) */}
+      {savedGridInfo && (
+        <div style={{ position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:5000 }}>
+          <div className="wood-panel gf" style={{
+            padding:'10px 18px', fontSize:7, color:'#FFD700',
+            background:'rgba(30,15,5,0.97)', border:'2px solid #FFD700',
+            borderRadius:10, textAlign:'center', lineHeight:'1.8',
+            boxShadow:'0 4px 20px rgba(0,0,0,0.8)',
+          }}>
+            <div style={{ marginBottom:4, color:'#90EE90' }}>✅ FARM GRID SAVED</div>
+            <div>{savedGridInfo}</div>
+            <button className="wb gf" style={{ marginTop:8, fontSize:6, padding:'4px 10px' }}
+              onClick={() => setSavedGridInfo(null)}>TUTUP</button>
+          </div>
+        </div>
+      )}
+
+      {/* TUTORIAL OVERLAY */}
+      {tutorialActive && (
+        <div style={{ position:'absolute', inset:0, zIndex:8000, background:'rgba(0,0,0,0.6)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ 
+            padding:'60px 80px', width:600, height:420, textAlign:'center', 
+            background:'url(/instruction.png) no-repeat center', backgroundSize:'contain',
+            position:'relative', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center'
+          }}>
+            {/* STEP BADGE - PILL STYLE */}
+            <div style={{ 
+              position:'absolute', top:85, right:110, 
+              background:'rgba(255,255,255,0.7)', padding:'4px 15px', 
+              borderRadius:20, border:'2px solid #5A3A1A',
+              color:'#3E2717', fontSize:10, fontWeight:'bold'
+            }}>
+              STEP {tutStep + 1} / {(MAP_INSTRUCTIONS[ds.currentMap] || MAP_INSTRUCTIONS.home).length}
             </div>
-          )}
-          {activePanel === 'settings' && (
-            <div className="panel">
-              <button className="panel-close" onClick={() => setActivePanel(null)}>✕ CLOSE</button>
-              <div className="panel-title">⚙️ SETTINGS</div>
-              <div style={{ color: '#DEB887' }}>
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{ marginBottom: '4px' }}>Zoom: {Math.round(displayState.zoom * 100)}%</div>
-                  <input type="range" min="75" max="300" step="25"
-                    value={Math.round(displayState.targetZoom * 100)}
-                    onChange={e => { stateRef.current.targetZoom = Number(e.target.value) / 100; }}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <div style={{ fontSize: '7px', lineHeight: '1.8', marginTop: '12px' }}>
-                  <div><b>WASD</b> — Move character</div>
-                  <div><b>E / Space / Click</b> — Use tool on nearest plot</div>
-                  <div><b>Scroll</b> — Zoom in/out</div>
-                  <div><b>+/-</b> — Zoom in/out</div>
-                  <div><b>1-8</b> — Select tool slot</div>
-                  <div><b>ESC</b> — Close panels</div>
-                </div>
+
+            <h2 style={{ color:'#FFF', fontSize:22, marginTop:-20, marginBottom:30, textShadow:'2px 2px 0 #000', letterSpacing:1 }}>HOW TO PLAY</h2>
+            
+            <div style={{ 
+              display:'flex', alignItems:'center', gap:25, 
+              padding:'10px', width:'90%', minHeight:150
+            }}>
+              {/* TOOL ICON SLOT */}
+              <div style={{ 
+                width:95, height:95, display:'flex', alignItems:'center', justifyContent:'center',
+                borderRadius:20, background:'rgba(255,255,255,0.7)', 
+                border:'2px solid #5A3A1A', flexShrink:0,
+                boxShadow:'inset 0 0 10px rgba(0,0,0,0.2)'
+              }}>
+                {tutStep > 0 && tutStep < 5 ? (
+                  TOOLS[tutStep-1].img.startsWith('/') ? (
+                    <img src={TOOLS[tutStep-1].img} style={{ width:56, height:56 }} alt="tool" />
+                  ) : (
+                    <span style={{ fontSize:48 }}>{TOOLS[tutStep-1].img}</span>
+                  )
+                ) : (
+                  <span style={{ fontSize:50 }}>👑</span>
+                )}
+              </div>
+
+              {/* PIXEL TEXT CONTENT */}
+              <div style={{ textAlign:'left', flex:1 }}>
+                <h3 style={{ color:'#3E2717', fontSize:14, marginBottom:8, fontWeight:'bold', textTransform:'uppercase' }}>
+                  {ds.currentMap.toUpperCase()} GUIDE
+                </h3>
+                <p style={{ color:'#3E2717', fontSize:11, lineHeight:1.6, fontWeight:'500', maxWidth:280 }}>
+                  {(MAP_INSTRUCTIONS[ds.currentMap] || MAP_INSTRUCTIONS.home)[tutStep]}
+                </p>
               </div>
             </div>
+
+            {/* ACTION BUTTONS */}
+            <div style={{ marginTop: 25 }}>
+              {tutStep < (MAP_INSTRUCTIONS[ds.currentMap] || MAP_INSTRUCTIONS.home).length - 1 ? (
+                <button className="wb gf" style={{ 
+                     padding:'10px 32px', fontSize:11,
+                     background:'linear-gradient(180deg, #A07850, #7D5A3A)', 
+                     border:'3px solid #3E2717', borderRadius:20, color:'#FFF',
+                     boxShadow:'0 4px 0 #3E2717', cursor:'pointer'
+                   }} onClick={() => setTutStep(tutStep + 1)}>
+                   NEXT TIP →
+                </button>
+              ) : (
+                <button className="wb gf" style={{ 
+                    padding:'14px 44px', fontSize:13, 
+                    background:'linear-gradient(180deg, #8B4513, #5C2301)', 
+                    border:'3px solid #D4AF37', borderRadius:40, color:'#FFD700',
+                    boxShadow:'0 6px 0 #3E2717', cursor:'pointer'
+                  }} 
+                  onClick={() => {
+                     setTutorialActive(false);
+                     stateRef.current.tutorialActive = false;
+                     if (ds.currentMap === 'home' && ds.demoMode) {
+                        stateRef.current.notification = { text: "WATCH THE DEMO!", life: 100 };
+                        setDs({...stateRef.current});
+                     } else {
+                        stateRef.current.notification = { text: `WELCOME TO ${ds.currentMap.toUpperCase()}!`, life: 100 };
+                        setDs({...stateRef.current});
+                     }
+                  }}>
+                  {ds.currentMap === 'home' ? 'START JOURNEY' : 'LET\'S GO!'}
+                </button>
+              )}
+            </div>
+          </div>
+          
+          {/* Highlight Indicator */}
+          {tutStep > 0 && tutStep < 5 && (
+            <div style={{ position:'absolute', bottom:110, left:'50%', transform:'translateX(-50%)', animation:'bounce 1s infinite' }}>
+              <div style={{ color:'#FFD700', fontSize:30 }}>↓</div>
+            </div>
           )}
+        </div>
+      )}
+
+      {/* PERSISTENT START BUTTON DURING DEMO */}
+      {!tutorialActive && ds.demoMode && (
+        <div style={{ position:'absolute', bottom:100, left:'50%', transform:'translateX(-50%)', zIndex:8500 }}>
+           <button className="wb gf" style={{
+              padding:'18px 50px', fontSize:14,
+              background:'linear-gradient(180deg, #8B4513, #5C2301)',
+              border:'4px solid #D4AF37', borderRadius:40, color:'#FFD700',
+              boxShadow:'0 10px 30px rgba(0,0,0,0.8)', cursor:'pointer'
+            }}
+            onClick={() => {
+              stateRef.current.demoMode = false;
+              stateRef.current.activePanel = null;
+              stateRef.current.bubbleText = "";
+              // CLEAN FARM FOR USER EXPLORATION
+              stateRef.current.farmPlots = stateRef.current.farmPlots.map(p => ({
+                 ...p,
+                 tilled: false,
+                 watered: false,
+                 fertilized: false,
+                 crop: null
+              }));
+              stateRef.current.demoMode = false;
+              stateRef.current.demoTimer = 0;
+              stateRef.current.tutorialActive = true;
+              stateRef.current.mousePos = { x: 0, y: 0 };
+              stateRef.current.mouseHoveredPlotId = null;
+              setActivePanel(null);
+              stateRef.current.notification = { text: "ADVENTURE BEGINS!", life: 120 };
+              setDs({...stateRef.current});
+            }}>
+             LET'S PLAY →
+           </button>
+        </div>
+      )}
+
+      {/* LOGIN OVERLAY */}
+      {!walletConnected && !splashDone && (
+        <div style={{ position:'absolute', inset:0, zIndex:9000, background:'url(/map_base.png)', backgroundSize:'cover', display:'flex', alignItems:'center', justifyContent:'center' }}>
+           <div className="wood-panel gf" style={{ padding:'40px', textAlign:'center', border:'5px solid #8B4513' }}>
+              <img src="/logo.png" style={{ height:120, marginBottom:30 }} />
+              <h1 style={{ color:'#FFD700', fontSize:14, marginBottom:40 }}>CONNECT YOUR WALLET TO START</h1>
+              <div style={{ display:'flex', flexDirection:'column', gap:15 }}>
+                  <button className="wb gf" onClick={connectPhantom} style={{ padding:'20px', fontSize:11, background:'linear-gradient(180deg, #ab9ff2, #512da8)' }}>PHANTOM WALLET</button>
+                  <button className="wb gf" onClick={connectMetaMask} style={{ padding:'20px', fontSize:11, background:'linear-gradient(180deg, #f6851b, #be630a)' }}>METAMASK WALLET</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {ds.notification && (
+        <div style={{ position:'absolute', top:'20%', left:'50%', transform:'translateX(-50%)', zIndex:5000, pointerEvents:'none' }}>
+           <div className="wb gf" style={{ padding:'18px 36px', fontSize:14, border:'4px solid #FFD700', color:'#FFD700', background:'rgba(62,39,23,0.95)', boxShadow:'0 15px 40px rgba(0,0,0,0.8)', textAlign:'center', animation:'pulse 1s infinite' }}>
+             {ds.notification.text.toUpperCase()}
+           </div>
         </div>
       )}
     </div>
   );
 }
+
