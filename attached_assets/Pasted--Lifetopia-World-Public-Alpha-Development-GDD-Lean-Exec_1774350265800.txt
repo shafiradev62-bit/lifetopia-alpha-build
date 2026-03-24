@@ -1,0 +1,198 @@
+
+Lifetopia World
+Public Alpha Development GDD
+Lean Execution Scope
+1. Project Overview
+Lifetopia World Public Alpha adalah vertical slice dari cozy life simulation game berbasis farming yang dibangun menggunakan Unity dengan integrasi Solana.
+Fase ini bertujuan untuk memvalidasi kombinasi antara gameplay inti dan integrasi Web3 secara praktis dalam lingkungan permainan yang nyata.
+Scope development sengaja dibuat lean agar dapat dieksekusi dengan cepat oleh tim kecil dalam waktu singkat, sambil tetap menghasilkan bukti eksekusi yang kuat untuk pengembangan selanjutnya.
+Public Alpha ini akan memperkenalkan:
+Core gameplay farming loop yang stabil
+• Solana wallet based identity
+• Persistent player progression
+• Eksperimen utility NFT sederhana
+• Interaksi on chain melalui Solana Devnet
+Hasil dari fase ini akan menjadi fondasi teknis dan gameplay untuk ekspansi fitur Lifetopia World di masa depan.
+Durasi development: 4 minggu
+Target platform: Desktop Web Build
+Blockchain environment: Solana Devnet
+2. Core Gameplay Vision
+Lifetopia World adalah cozy social sandbox life simulation yang berfokus pada aktivitas santai seperti farming, progression, dan eksplorasi.
+Pada fase Public Alpha ini, fokus utama adalah memvalidasi gameplay loop inti.
+Gameplay loop utama:
+Player login menggunakan wallet
+Player memasuki farm instance
+Player menanam tanaman
+Tanaman tumbuh dalam waktu tertentu
+Player memanen tanaman
+Player mendapatkan resource
+Resource digunakan untuk progression
+Loop ini harus dapat dimainkan berulang dan memberikan rasa progression yang jelas.
+3. Core Systems
+Player Identity System
+Player identity menggunakan Solana wallet sebagai identitas utama pemain.
+Wallet berfungsi sebagai:
+Unique player identifier
+• Login system
+• Ownership verification untuk NFT
+• Reference untuk interaksi on chain
+Login Flow
+Player membuka game
+Player connect wallet
+Game membaca wallet address
+Game membuat player session
+Game memuat data progression pemain
+Player Progression System
+Progression pemain disimpan secara off chain untuk menjaga performa dan kesederhanaan sistem pada fase awal.
+Data yang disimpan meliputi:
+Wallet address
+• Player level
+• Inventory
+• Jumlah GOLD
+• Progress quest
+Data progression harus bersifat persistent sehingga pemain tidak kehilangan progress saat logout.
+4. Game Economy
+GOLD Currency
+GOLD adalah mata uang utama dalam game.
+GOLD digunakan untuk:
+Reward dari farming
+• Reward dari quest
+• Tracking progression pemain
+Pada fase ini GOLD masih bersifat off chain currency.
+GOLD tidak berada di blockchain pada fase Public Alpha.
+5. Farming Gameplay System
+Farming Mechanics
+Sistem farming menjadi gameplay utama dalam Public Alpha.
+Aktivitas yang dapat dilakukan pemain:
+Menanam seed
+• Menunggu tanaman tumbuh
+• Memanen tanaman
+Setiap tanaman memiliki parameter:
+Grow time
+• Yield amount
+• GOLD reward
+Contoh Crop
+Wheat
+Grow time
+2 menit
+Harvest reward
+5 GOLD
+Tujuan sistem ini adalah menciptakan gameplay loop sederhana namun memuaskan.
+Inventory System
+Inventory digunakan untuk menyimpan item yang dimiliki pemain.
+Inventory harus mendukung:
+Seeds
+• Harvested crops
+• Quest items
+UI inventory minimal meliputi:
+Grid inventory
+• Item quantity
+• Simple tooltip
+6. Daily Quest System
+Daily quest berfungsi meningkatkan engagement pemain.
+Contoh quest:
+Harvest 5 crops
+• Plant 10 seeds
+• Earn 20 GOLD
+Reward quest:
+GOLD reward
+• Potensi eligibility untuk claim NFT
+Quest harus dapat diselesaikan dalam satu sesi bermain.
+7. Web3 Integration
+Pada fase Public Alpha, Lifetopia World mulai memperkenalkan interaksi blockchain sederhana melalui Solana Devnet.
+Tujuannya bukan spekulasi, tetapi memvalidasi mekanik ownership dan interaksi on chain.
+8. NFT Utility System
+Game akan memiliki koleksi NFT utility terbatas yang digunakan untuk eksperimen gameplay.
+NFT ini hanya tersedia selama fase Alpha.
+Karakteristik NFT:
+Utility focused
+• Non transferable selama Alpha
+• Didistribusikan gratis kepada tester
+NFT Gameplay Boost
+NFT memberikan boost kecil dalam gameplay.
+Contoh boost:
+Farming speed increase
+• Harvest yield increase
+Boost bersifat ringan dan hanya bertujuan untuk menguji integrasi on chain.
+NFT On Chain Interaction
+NFT akan dimint dan diverifikasi melalui Solana Devnet.
+Game harus dapat:
+Membaca NFT dari wallet pemain
+• Memverifikasi ownership
+• Mengaktifkan efek boost dalam gameplay
+Flow Sistem
+Player login wallet
+Game membaca NFT pada wallet
+Game memverifikasi ownership
+Game mengaktifkan boost jika NFT ditemukan
+NFT Distribution
+NFT akan didistribusikan kepada early testers.
+Metode distribusi:
+Whitelist tester
+• Claim system sederhana
+Target distribusi minimal:
+50 NFT claim
+9. Technical Architecture
+Hosting Infrastructure
+Public Alpha harus tersedia secara online.
+Infrastruktur minimal:
+Domain
+• Hosting
+• Basic security
+Game dapat dimainkan langsung melalui browser.
+Backend System
+Backend diperlukan untuk:
+Menyimpan player progression
+• Inventory data
+• Quest data
+• GOLD balance
+Backend dapat menggunakan solusi sederhana seperti:
+Firebase
+• Supabase
+• Backend ringan lainnya
+Performance Target
+Game harus stabil pada:
+Desktop browser
+• Mid range PC
+Target teknis:
+Gameplay responsif
+• Loading time cepat
+• Frame rate stabil
+10. Public Alpha Deployment
+Setelah development selesai, game akan dirilis sebagai Public Alpha build.
+Game harus:
+Dapat diakses publik
+• Dapat dimainkan oleh user nyata
+• Stabil untuk pengujian gameplay
+Landing page harus menyediakan:
+Play button
+• Wallet login
+• Informasi singkat tentang game
+11. Player Feedback System
+Public Alpha digunakan untuk mengumpulkan feedback pemain.
+Channel feedback:
+Discord
+• Feedback form
+• Bug report channel
+Data yang dikumpulkan:
+Gameplay feedback
+• Bug report
+• Engagement data
+12. Success Metrics
+Public Alpha dianggap berhasil jika:
+Game dapat dimainkan online minimal 30 hari
+• Minimal 100 wallet connection
+• Minimal 50 NFT claim
+• Minimal 40 persen pemain menyelesaikan gameplay loop penuh
+• Average session duration minimal 10 menit
+• Minimal 20 returning players
+• Tidak ada bug kritikal yang membuat game tidak dapat dimainkan
+13. Final Deliverable
+Deliverable utama dari fase ini adalah:
+Lean Public Alpha Vertical Slice dari Lifetopia World yang menampilkan:
+Stable farming gameplay loop
+• Solana wallet based login
+• Persistent player progression
+• NFT utility experiment melalui Devnet
+• Public playable build untuk real user testing
+Release ini akan menjadi bukti eksekusi awal dari Lifetopia World dan menjadi fondasi untuk pengembangan sistem yang lebih besar di masa depan termasuk social features, world expansion, dan integrasi ekonomi on chain yang lebih dalam.

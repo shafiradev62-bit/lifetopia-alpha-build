@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Lifetopia Farming Game"
+version = "1.0.0"
+id = "artifacts/farming-game"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21897
+
+[services.development]
+run = "pnpm --filter @workspace/farming-game run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/farming-game", "run", "build" ]
+publicDir = "artifacts/farming-game/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21897"
+BASE_PATH = "/"
