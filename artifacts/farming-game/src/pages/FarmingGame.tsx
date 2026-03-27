@@ -24,6 +24,7 @@ import {
   getTokenBalance,
   initializeTokenAccount,
 } from "../game/solanaToken";
+import { AudioManager } from "../game/AudioSystem";
 
 /* Exact tool icons from assets folder as requested */
 const TOOLS = [
@@ -59,12 +60,13 @@ export default function FarmingGame() {
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [tutorialActive, setTutorialActive] = useState(false);
   const [tutStep, setTutStep] = useState(0);
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [walletAddress, setWalletAddress] = useState("");
+  const [walletConnected, setWalletConnected] = useState(true);
+  const [walletAddress, setWalletAddress] = useState("GuestFarmer");
   const [walletType, setWalletType] = useState<"solana" | "evm" | null>(null);
   const [nfts, setNfts] = useState<string[]>([]);
   const [phantomFound, setPhantomFound] = useState(false);
   const [metamaskFound, setMetamaskFound] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("farm_grid");
@@ -109,6 +111,8 @@ export default function FarmingGame() {
 
   const handleSplashSelect = useCallback(
     (map: MapType) => {
+      AudioManager.init(); // Initialize on first player choice
+      AudioManager.playBGM("/backsound.mp3"); // Start main music
       doSwitchMap(map);
       setSplashDone(true);
       setIntroTutorialDone(false);
@@ -189,10 +193,16 @@ export default function FarmingGame() {
       localStorage.setItem("wallet_addr", addr);
       localStorage.setItem("wallet_type", "solana");
       stateRef.current.player.walletAddress = addr;
+      
+      // FIX sync: await load before save
+      setInitialLoadComplete(false); // Reset lock while loading
+      await loadProgress(addr);
+      
       stateRef.current.notification = { text: "PHANTOM CONNECTED!", life: 120 };
       setDs({ ...stateRef.current });
-      loadProgress(addr);
-      saveProgress();
+      
+      // Save only if lock is open
+      await saveProgress();
     } catch (e: any) {
       stateRef.current.notification = {
         text: (e?.message || "CONNECT FAILED").toUpperCase().slice(0, 40),
@@ -236,13 +246,17 @@ export default function FarmingGame() {
       localStorage.setItem("wallet_addr", addr);
       localStorage.setItem("wallet_type", "evm");
       stateRef.current.player.walletAddress = addr;
+      
+      // FIX sync: await load before save
+      setInitialLoadComplete(false); // Reset lock while loading
+      await loadProgress(addr);
+
       stateRef.current.notification = {
         text: "METAMASK CONNECTED!",
         life: 120,
       };
       setDs({ ...stateRef.current });
-      loadProgress(addr);
-      saveProgress();
+      await saveProgress();
     } catch (e: any) {
       stateRef.current.notification = {
         text: (e?.message || "CONNECT FAILED").toUpperCase().slice(0, 40),
@@ -279,14 +293,16 @@ export default function FarmingGame() {
         if (data.nfts && Array.isArray(data.nfts)) setNfts(data.nfts);
         setDs({ ...stateRef.current });
       }
+      setInitialLoadComplete(true); // Open lock after load attempt
     } catch (e) {
       console.warn("[Persistence] No saved data found or load error:", e);
+      setInitialLoadComplete(true); // Still enable saving even if load fails (new user)
     }
   };
 
   const saveProgress = async () => {
     const addr = stateRef.current.player.walletAddress;
-    if (!addr || addr.startsWith("guest")) return;
+    if (!addr || addr.startsWith("guest") || !initialLoadComplete) return;
     try {
       await supabase.from("players").upsert(
         {
@@ -320,7 +336,12 @@ export default function FarmingGame() {
       setWalletType(type === "solana" ? "solana" : "evm");
       setWalletConnected(true);
       stateRef.current.player.walletAddress = addr;
-      loadProgress(addr);
+      
+      // Auto-restore progress on mount
+      setInitialLoadComplete(false);
+      loadProgress(addr).then(() => {
+         setDs({ ...stateRef.current });
+      });
     }
   }, []);
 
@@ -524,16 +545,16 @@ export default function FarmingGame() {
   };
 
   const selectTool = (toolId: string) => {
+    AudioManager.playSFX("click"); // Immediate feedback
     stateRef.current.player.tool = toolId as any;
-    // TUTORIAL: SELECT HOE
-    if (stateRef.current.player.tutorialStep === 1 && toolId === "sickle")
-      stateRef.current.player.tutorialStep = 2;
-    // TUTORIAL: SELECT PUPUK
-    if (stateRef.current.player.tutorialStep === 3 && toolId === "fertilizer")
-      stateRef.current.player.tutorialStep = 4;
-    // TUTORIAL: SELECT SEEDS
-    if (stateRef.current.player.tutorialStep === 5 && toolId.endsWith("-seed"))
-      stateRef.current.player.tutorialStep = 6;
+    
+    // SEQUENTIAL TUTORIAL LOGIC
+    const s = stateRef.current.player;
+    if (s.tutorialStep === 1 && toolId === "sickle") s.tutorialStep = 2;
+    if (s.tutorialStep === 3 && toolId === "fertilizer") s.tutorialStep = 4;
+    if (s.tutorialStep === 5 && toolId.includes("wheat-seed")) s.tutorialStep = 6;
+    if (s.tutorialStep === 7 && toolId === "water") s.tutorialStep = 8;
+    if (s.tutorialStep === 9 && toolId === "sickle") s.tutorialStep = 10;
 
     setDs({ ...stateRef.current });
   };
@@ -612,8 +633,31 @@ export default function FarmingGame() {
     const mx = (e.clientX - rect.left) * scaleX;
     const my = (e.clientY - rect.top) * scaleY;
 
-    // Always process click-to-move on all maps
+    // TUTORIAL: Click-to-Action progression
+    const s = stateRef.current.player;
+    const oldStep = s.tutorialStep;
+    
     stateRef.current = handleToolAction(stateRef.current, mx, my);
+    
+    // Check if tutorial advanced (handled in handleToolAction for soil, but we can verify here)
+    // Actually, I'll update handleToolAction later, for now we can check plot states.
+    if (oldStep === 2) {
+      const isAnyTilled = stateRef.current.farmPlots.some(p => p.tilled);
+      if (isAnyTilled) s.tutorialStep = 3;
+    }
+    if (oldStep === 4) {
+      const isAnyFertilized = stateRef.current.farmPlots.some(p => p.fertilized);
+      if (isAnyFertilized) s.tutorialStep = 5;
+    }
+    if (oldStep === 6) {
+      const isAnyPlanted = stateRef.current.farmPlots.some(p => p.crop);
+      if (isAnyPlanted) s.tutorialStep = 7;
+    }
+    if (oldStep === 8) {
+      const isAnyWatered = stateRef.current.farmPlots.some(p => p.watered);
+      if (isAnyWatered) s.tutorialStep = 9;
+    }
+
     setDs({ ...stateRef.current });
   };
 
@@ -682,24 +726,21 @@ export default function FarmingGame() {
         .gf { font-family: 'Press Start 2P', 'Courier New', monospace; }
 
         .wood-panel {
-          background: linear-gradient(180deg, rgba(16,22,34,0.96) 0%, rgba(10,14,24,0.96) 100%);
-          border: 1px solid rgba(123, 161, 255, 0.35);
+          background: linear-gradient(180deg, #CE9E64 0%, #8D5A32 100%);
+          border: 4px solid #5C4033;
           border-radius: 16px;
-          box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.05);
+          box-shadow: 0 12px 30px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,255,255,0.3);
           position: relative;
-          backdrop-filter: blur(8px);
         }
 
         .gold-header {
-          background: transparent;
-          border: none;
-          border-bottom: 1px solid rgba(123, 161, 255, 0.25);
-          border-radius: 0;
-          padding: 10px 0 12px 0;
-          color: #EAF1FF;
-          text-shadow: none;
-          font-size: 12px;
-          letter-spacing: 0.6px;
+          background: #5C4033;
+          border-radius: 10px 10px 0 0;
+          padding: 10px 12px;
+          color: #FFD700;
+          text-shadow: 1px 1px #000;
+          font-size: 10px;
+          letter-spacing: 1px;
         }
 
         .wb {
@@ -809,7 +850,13 @@ export default function FarmingGame() {
           z-index: 10000;
           border-radius: 50%;
         }
+        @keyframes pft-instr-bounce {
+          0%, 100% { transform: translate(-50%, 0); }
+          50% { transform: translate(-50%, -10px); }
+        }
       `}</style>
+
+      {/* TUTORIAL INSTRUCTION BOX REMOVED AS REQUESTED - ONLY BADGES REMAIN */}
 
       {/* LOGO WITH PREMIUM SHINE EFFECT - ONLY SHOW IN GAME */}
       {splashDone && walletConnected && (
@@ -836,12 +883,12 @@ export default function FarmingGame() {
       />
 
       {/* SPLASH LOGO FIRST */}
-      {walletConnected && !splashDone && (
+      {!splashDone && (
         <SplashScreen onSelectMap={handleSplashSelect} />
       )}
 
       {/* PRE-FARM CINEMATIC TUTORIAL FLOW */}
-      {walletConnected && splashDone && !introTutorialDone && (
+      {splashDone && !introTutorialDone && (
         <PreFarmTutorial
           visible={true}
           onFinished={handlePreFarmTutorialFinished}
@@ -850,108 +897,179 @@ export default function FarmingGame() {
       )}
 
       {/* TOP NAV - UNIFIED HUB */}
-      <div
-        style={{
-          position: "absolute",
-          top: 20,
-          right: 20,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-        }}
-      >
+      {splashDone && introTutorialDone && (
         <div
-          className="wb gf"
           style={{
-            color: "#FFE4B5",
-            padding: "6px 15px",
-            pointerEvents: "none",
+            position: "absolute",
+            top: 20,
+            right: 20,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
           }}
         >
-          LVL {ds.player.level}
-        </div>
-        <button className="wb gf" onClick={() => setActivePanel("wallet")}>
-          WALLET
-        </button>
-        <button className="wb gf" onClick={() => setActivePanel("quests")}>
-          TASKS
-        </button>
-        <button className="wb gf" onClick={() => setActivePanel("inventory")}>
-          ITEMS
-        </button>
-        <button className="wb gf" onClick={() => setActivePanel("nft")}>
-          MY NFTS
-        </button>
-        <div
-          className="wb gf"
-          style={{ color: "#FFD700", pointerEvents: "none" }}
-        >
-          G {ds.player.gold}
-        </div>
-        <div
-          className="wb gf"
-          style={{ color: "#00BFFF", pointerEvents: "none" }}
-        >
-          {ds.player.lifetopiaGold} LFG
-        </div>
-        <button
-          className="wb gf"
-          style={{ fontSize: 14, padding: "6px 10px" }}
-          onClick={() => setActivePanel("settings")}
-        >
-          ⚙
-        </button>
-      </div>
-
-      {/* BOTTOM CENTER TOOLS */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 25,
-          left: "50%",
-          transform: "translateX(-50%)",
-        }}
-      >
-        {ds.currentMap === "home" && (
           <div
-            className="tray"
+            className="wb gf"
             style={{
-              pointerEvents:
-                tutorialActive || ds.demoMode || !introTutorialDone
-                  ? "none"
-                  : "auto",
-              opacity:
-                tutorialActive || ds.demoMode || !introTutorialDone ? 0.7 : 1,
+              color: "#FFE4B5",
+              padding: "6px 15px",
+              pointerEvents: "none",
             }}
           >
-            {TOOLS.map((t, i) => {
-              const matchesStep =
-                tutorialActive &&
-                ((tutStep === 1 && t.id === "sickle") ||
-                  (tutStep === 2 &&
-                    (t.id === "wheat-seed" || t.id.includes("seed"))) ||
-                  (tutStep === 3 && t.id === "water") ||
-                  (tutStep === 4 && (t.id === "axe" || t.id === "axe-large")));
-              return (
-                <div
-                  key={t.id}
-                  className={`slot ${ds.player.tool === t.id ? "active-tool" : ""} ${matchesStep ? "glowing-tool" : ""}`}
-                  onClick={() => selectTool(t.id)}
-                >
-                  <span className="slot-key">{i + 1}</span>
-                  {t.img.startsWith("/") ? (
-                    <img src={t.img} className="tool-img" alt={t.label} />
-                  ) : (
-                    <div style={{ fontSize: 24 }}>{t.img}</div>
-                  )}
-                </div>
-              );
-            })}
+            LVL {ds.player.level}
           </div>
-        )}
-      </div>
+          <button className="wb gf" onClick={() => setActivePanel("wallet")}>
+            WALLET
+          </button>
+          <button className="wb gf" onClick={() => setActivePanel("quests")}>
+            TASKS
+          </button>
+          <button className="wb gf" onClick={() => setActivePanel("inventory")}>
+            ITEMS
+          </button>
+          <button className="wb gf" onClick={() => setActivePanel("nft")}>
+            MY NFTS
+          </button>
+          <div
+            className="wb gf"
+            style={{ color: "#FFD700", pointerEvents: "none" }}
+          >
+            G {ds.player.gold}
+          </div>
+          <div
+            className="wb gf"
+            style={{ color: "#00BFFF", pointerEvents: "none" }}
+          >
+            {ds.player.lifetopiaGold} LFG
+          </div>
+          <button
+            className="wb gf"
+            style={{ fontSize: 14, padding: "6px 10px" }}
+            onClick={() => setActivePanel("settings")}
+          >
+            ⚙
+          </button>
+        </div>
+      )}
 
-      {/* Map selection panel removed per no-map-select-screen request */}
+      {/* BOTTOM CENTER TOOLS */}
+      {splashDone && introTutorialDone && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 100, // Moved up to avoid overlapping and for better visibility
+            left: "50%",
+            transform: "translateX(-50%)",
+          }}
+        >
+          {ds.currentMap === "home" && (
+            <div
+              className="tray"
+              style={{
+                pointerEvents:
+                  tutorialActive || ds.demoMode || !introTutorialDone
+                    ? "none"
+                    : "auto",
+                opacity:
+                  tutorialActive || ds.demoMode || !introTutorialDone ? 0.7 : 1,
+              }}
+            >
+              {TOOLS.map((t, i) => {
+                const matchesStep =
+                  tutorialActive &&
+                  ((tutStep === 1 && t.id === "sickle") ||
+                    (tutStep === 2 &&
+                      (t.id === "wheat-seed" || t.id.includes("seed"))) ||
+                    (tutStep === 3 && t.id === "water") ||
+                    (tutStep === 4 && (t.id === "axe" || t.id === "axe-large")));
+                
+                // Guide numbers for first timers
+                let guideStep: number | null = null;
+                if (t.id === "sickle") guideStep = 1;
+                if (t.id.endsWith("-seed") && t.id.includes("wheat")) guideStep = 2; // Point to wheat as step 2
+                if (t.id === "water") guideStep = 3;
+
+                return (
+                  <div
+                    key={t.id}
+                    className={`slot ${ds.player.tool === t.id ? "active-tool" : ""} ${matchesStep ? "glowing-tool" : ""}`}
+                    onClick={() => selectTool(t.id)}
+                  >
+                    <span className="slot-key">{i + 1}</span>
+                    {/* LOGICAL SEQUENCE BADGES (1: Hoe, 2: Wheat, 3: Water, 4: Tomato, 5: Carrot, 6: Pumpkin, 7: Axe, 8: Large Axe) */}
+                    {(() => {
+                      let logicalNum = i + 1;
+                      if (t.id === "sickle") logicalNum = 1;
+                      else if (t.id === "wheat-seed") logicalNum = 2; // Slot 5
+                      else if (t.id === "water") logicalNum = 3; // Slot 4
+                      else if (t.id === "tomato-seed") logicalNum = 4; // Slot 6
+                      else if (t.id === "carrot-seed") logicalNum = 5; // Slot 7
+                      else if (t.id === "pumpkin-seed") logicalNum = 6; // Slot 8
+                      else if (t.id === "axe") logicalNum = 7; // Slot 2
+                      else if (t.id === "axe-large") logicalNum = 8; // Slot 3
+
+                      return (
+                        <div 
+                          style={{
+                            position: 'absolute',
+                            top: -12,
+                            right: -12,
+                            width: 24,
+                            height: 24,
+                            background: '#FFD700',
+                            border: '2px solid #5C4033',
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#3E2723',
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            zIndex: 20,
+                            boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
+                            // ONLY PULSE IF IT IS THE CURRENT TUTORIAL TARGET
+                            animation: (
+                                (ds.player.tutorialStep === 1 && logicalNum === 1) ||
+                                (ds.player.tutorialStep === 5 && logicalNum === 2) || // Wheat step
+                                (ds.player.tutorialStep === 7 && logicalNum === 3)   // Water step
+                            ) ? 'pulse 1s infinite' : 'none'
+                          }}
+                        >
+                          {logicalNum}
+                        </div>
+                      );
+                    })()}
+
+                    {t.img.startsWith("/") ? (
+                      <img src={t.img} className="tool-img" alt={t.label} />
+                    ) : (
+                      <div style={{ fontSize: 24 }}>{t.img}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MAP SELECTOR - RESTORED BROWN TRAY */}
+      {splashDone && introTutorialDone && (
+        <div style={{ position: 'absolute', bottom: 25, left: 25, zIndex: 1000 }}>
+          <div className="tray" style={{ padding: '8px 15px', gap: 6 }}>
+            {MAPS.map(m => (
+              <button 
+                key={m.id}
+                className={`wb gf ${ds.currentMap === m.id ? 'active' : ''}`}
+                style={{ fontSize: 7, padding: '7px 10px' }}
+                onClick={() => doSwitchMap(m.id)}
+              >
+                {m.label.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* POP-UPS */}
       {activePanel && (
@@ -996,7 +1114,7 @@ export default function FarmingGame() {
                     <>
                       <div
                         style={{
-                          color: "#38D39F",
+                          color: "#8B4513",
                           fontSize: 9,
                           marginBottom: 10,
                         }}
@@ -1005,13 +1123,14 @@ export default function FarmingGame() {
                       </div>
                       <div
                         style={{
-                          background: "rgba(255,255,255,0.04)",
-                          border: "1px solid rgba(123, 161, 255, 0.25)",
+                          background: "rgba(0,0,0,0.15)",
+                          border: "2px solid #5C4033",
                           padding: "10px",
                           borderRadius: 10,
                           fontSize: 7,
                           wordBreak: "break-all",
-                          color: "#DCE9FF",
+                          color: "#FFF5E0",
+                          textShadow: "1px 1px #000",
                           marginBottom: 10,
                         }}
                       >
@@ -1180,17 +1299,22 @@ export default function FarmingGame() {
               )}
               {activePanel === "quests" && (
                 <div>
-                  {ds.quests.map((q) => (
+                   {ds.quests.map((q) => (
                     <div
                       key={q.id}
                       style={{
-                        borderBottom: "1px solid #8B5E3C",
-                        padding: "6px 0",
-                        fontSize: 6,
+                        background: 'rgba(0,0,0,0.1)',
+                        borderBottom: "1px solid #5C4033",
+                        padding: "10px",
+                        fontSize: 7,
+                        color: q.completed ? '#3d8b3d' : '#4D2D18',
+                        textShadow: q.completed ? 'none' : '0 1px rgba(255,255,255,0.2)'
                       }}
                     >
-                      {q.completed ? "✅" : "⏳"} {q.title} ({q.current}/
-                      {q.target})
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{q.completed ? "✅" : "⏳"} {q.title}</span>
+                        <span style={{ color: '#8B4513' }}>{q.current}/{q.target}</span>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1440,72 +1564,53 @@ export default function FarmingGame() {
                 </div>
               )}
               {activePanel === "settings" && (
-                <div style={{ fontSize: 7 }}>
-                  <div style={{ marginBottom: 8 }}>MUSIC: ON</div>
-                  <div style={{ marginBottom: 10 }}>SFX: ON</div>
-
-                  <div style={{ marginBottom: 6, color: "#5C4033" }}>
-                    FARM BALANCE PRESET
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 6,
-                      marginBottom: 10,
-                      flexWrap: "wrap",
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: 12,
+                    textAlign: 'center'
+                  }}
+                >
+                  <div style={{ fontSize: 8, color: "#8B4513", marginBottom: 4 }}>SOUND CONTROL</div>
+                  
+                  <button 
+                    className="wb gf"
+                    style={{ width: '100%', fontSize: 7, padding: '10px' }}
+                    onClick={() => {
+                        AudioManager.init();
+                        AudioManager.playBGM("/backsound.mp3");
+                        stateRef.current.notification = { text: "AUDIO SYSTEM ACTIVE!", life: 100 };
+                        setDs({...stateRef.current});
                     }}
                   >
-                    {(["casual", "normal", "hard"] as FarmBalancePreset[]).map(
-                      (preset) => {
-                        const active = ds.farmBalancePreset === preset;
-                        return (
-                          <button
-                            key={preset}
-                            className={`wb gf ${active ? "active" : ""}`}
-                            style={{ fontSize: 6, padding: "7px 10px" }}
-                            onClick={() => applyBalancePreset(preset)}
-                          >
-                            {preset.toUpperCase()}
-                          </button>
-                        );
-                      },
-                    )}
+                    REACTIVATE AUDIO
+                  </button>
+
+                  <div style={{ fontSize: 8, color: "#8B4513", marginTop: 8, marginBottom: 4 }}>FARM DIFFICULTY</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {(["casual", "normal", "hard"] as FarmBalancePreset[]).map((preset) => (
+                      <button
+                        key={preset}
+                        className={`wb gf ${ds.farmBalancePreset === preset ? "active" : ""}`}
+                        style={{ width: '100%', fontSize: 7, padding: '10px' }}
+                        onClick={() => applyBalancePreset(preset)}
+                      >
+                        {preset.toUpperCase()} MODE
+                      </button>
+                    ))}
                   </div>
 
-                  <div style={{ color: "#8B5E3C" }}>
-                    ACTIVE: {ds.farmBalancePreset.toUpperCase()}
+                  <div style={{ marginTop: 8, fontSize: 6, color: '#8B4513', opacity: 0.7 }}>
+                    ACTIVE: {ds.farmBalancePreset.toUpperCase()} | V.0.9.7
                   </div>
-                  <div style={{ marginTop: 6 }}>V.0.9.6</div>
                 </div>
               )}
             </div>
           </div>
         </div>
       )}
-      {/* FARM AREA VISUAL EDITOR — drag rectangle on canvas to set farm zone */}
-      {ds.currentMap === "home" && (
-        <div
-          style={{ position: "absolute", bottom: 100, right: 20, zIndex: 1000 }}
-        >
-          <button
-            className="wb gf"
-            onClick={() =>
-              setActivePanel(
-                activePanel === "farm-area-editor" ? null : "farm-area-editor",
-              )
-            }
-            style={{
-              color: activePanel === "farm-area-editor" ? "#FFD700" : "#FFF5E0",
-              fontSize: 7,
-              padding: "6px 10px",
-            }}
-          >
-            {activePanel === "farm-area-editor"
-              ? "✅ DONE"
-              : "🌱 SET FARM AREA"}
-          </button>
-        </div>
-      )}
+      {/* FARM AREA VISUAL EDITOR REMOVED AS REQUESTED */}
 
       {activePanel === "farm-area-editor" && (
         <>
@@ -1780,59 +1885,7 @@ export default function FarmingGame() {
         </div>
       )}
 
-      {/* LOGIN OVERLAY - ALWAYS SHOW IF WALLET NOT CONNECTED */}
-      {!walletConnected && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 10000,
-            background: "rgba(0,0,0,0.85)",
-            backgroundSize: "cover",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div
-            className="wood-panel gf"
-            style={{
-              padding: "40px",
-              textAlign: "center",
-              border: "5px solid #8B4513",
-            }}
-          >
-            <img src="/logo.png" style={{ height: 120, marginBottom: 30 }} />
-            <h1 style={{ color: "#FFD700", fontSize: 14, marginBottom: 40 }}>
-              CONNECT YOUR WALLET TO START
-            </h1>
-            <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
-              <button
-                className="wb gf"
-                onClick={connectPhantom}
-                style={{
-                  padding: "20px",
-                  fontSize: 11,
-                  background: "linear-gradient(180deg, #ab9ff2, #512da8)",
-                }}
-              >
-                PHANTOM WALLET
-              </button>
-              <button
-                className="wb gf"
-                onClick={connectMetaMask}
-                style={{
-                  padding: "20px",
-                  fontSize: 11,
-                  background: "linear-gradient(180deg, #f6851b, #be630a)",
-                }}
-              >
-                METAMASK WALLET
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {ds.notification && (
         <div

@@ -9,6 +9,7 @@ type StoryStep = {
   color: string;
   bubble: string;
   details: string[];
+  detailPointers: { top: string; left: string }[];
 };
 
 interface PreFarmTutorialProps {
@@ -22,72 +23,71 @@ const STEPS: StoryStep[] = [
     id: "farm",
     title: "FARM CORE LOOP",
     map: "home",
-    durationMs: 8400,
+    durationMs: 0, 
     color: "#8BC34A",
-    bubble:
-      "Welcome to your FARM. Till soil, plant seeds, water, fertilize, then harvest for gold and progress.",
+    bubble: "Welcome to your FARM. Till soil, plant seeds, water, fertilize, then harvest for gold.",
     details: [
-      "• Use tools to prepare plots and plant crops.",
-      "• Crop growth needs water and can be boosted by fertilizer.",
-      "• Harvest gives GOLD + inventory crops + quest progression.",
-      "• Dynamic plot states are tracked in real-time.",
+      "Select your HOE from the TOOLBAR at the bottom!",
+      "Then click the SOIL GRID here to prepare the ground.",
+      "Switch to SEEDS to start planting your first crop.",
+      "Watch them grow, then HARVEST to earn GOLD!"
     ],
+    detailPointers: [
+      { top: '92%', left: '50%' }, // TOOLBAR HOE
+      { top: '48%', left: '24%' }, // FARM GRID (START X: 197)
+      { top: '92%', left: '50%' }, // TOOLBAR SEEDS
+      { top: '48%', left: '24%' }  // FARM GRID
+    ]
   },
   {
     id: "city",
     title: "CITY SHOP SYSTEM",
     map: "city",
-    durationMs: 7000,
+    durationMs: 0,
     color: "#FFD54F",
-    bubble:
-      "This is the CITY. Buy seeds, tools, and supplies to scale your farming economy.",
+    bubble: "This is the CITY. Buy seeds, tools, and supplies to scale your economy.",
     details: [
-      "• Spend GOLD to buy seed stock and consumables.",
-      "• Refill your inventory before returning to farm.",
-      "• Better economy flow = faster progression.",
+      "Visit the SHOP STALL area on the right.",
+      "A [SHOP] button will appear here at the bottom center.",
+      "Click it to open the market and buy new seeds!"
     ],
+    detailPointers: [
+      { top: '40%', left: '80%' }, // Shop Stall area
+      { top: '82%', left: '50%' }, // Where [SHOP] button appears
+      { top: '82%', left: '50%' }  // [SHOP] button logic
+    ]
   },
   {
     id: "garden",
     title: "GARDEN SOCIAL HUB",
     map: "garden",
-    durationMs: 6800,
+    durationMs: 0,
     color: "#80DEEA",
-    bubble:
-      "In GARDEN, you can meet other players, chill, and share progression moments.",
+    bubble: "In GARDEN, you can meet other players, chill, and share progression moments.",
     details: [
-      "• Social roleplay and community interactions.",
-      "• Designed as a friendly multiplayer meeting point.",
-      "• Great place for events and seasonal activities.",
+      "Gather at the CENTRAL PLAZA to chat with fellow farmers.",
+      "This is a multiplayer safe-zone for social roleplay."
     ],
+    detailPointers: [
+      { top: '55%', left: '50%' }, // Plaza
+      { top: '55%', left: '50%' }  // Social area
+    ]
   },
   {
     id: "fishing",
     title: "FISHING SIDE ACTIVITY",
     map: "fishing",
-    durationMs: 6800,
+    durationMs: 0,
     color: "#64B5F6",
-    bubble:
-      "FISHING is your side income route. Cast, wait for bite timing, then reel for rewards.",
+    bubble: "FISHING is your side income. Cast, wait for bite, then reel for rewards.",
     details: [
-      "• Alternative gold flow outside farming cycle.",
-      "• Timing-focused mini gameplay for bonus profit.",
-      "• Useful when crops are still growing.",
+      "Head to the WATER EDGE on the left to start fishing.",
+      "It's a great way to earn gold while waiting for crops."
     ],
-  },
-  {
-    id: "suburban",
-    title: "SUBURBAN NEXT STEP",
-    map: "suburban",
-    durationMs: 6500,
-    color: "#CE93D8",
-    bubble:
-      "SUBURBAN is reserved for the next expansion phase: progression, content, and future systems.",
-    details: [
-      "• Planned area for upcoming gameplay stages.",
-      "• Future unlocks, events, and advanced progression.",
-      "• You are seeing the roadmap in-world.",
-    ],
+    detailPointers: [
+      { top: '65%', left: '42%' }, // Water
+      { top: '65%', left: '42%' }  // Fishing area
+    ]
   },
 ];
 
@@ -99,14 +99,6 @@ const MAP_BG: Record<MapType, string> = {
   suburban: "/map_suburban_1774358176142.png",
 };
 
-const MAP_ICON: Record<MapType, string> = {
-  home: "🌾",
-  city: "🏙️",
-  garden: "🌳",
-  fishing: "🎣",
-  suburban: "🏡",
-};
-
 export default function PreFarmTutorial({
   visible,
   onFinished,
@@ -114,62 +106,28 @@ export default function PreFarmTutorial({
 }: PreFarmTutorialProps) {
   const [started, setStarted] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
-  const [stepElapsed, setStepElapsed] = useState(0);
-  const [bubblePulse, setBubblePulse] = useState(0);
+  const [detailIndex, setDetailIndex] = useState(-1);
   const [typedBubble, setTypedBubble] = useState("");
-  const [shutterPhase, setShutterPhase] = useState<
-    "idle" | "closing" | "opening"
-  >("idle");
-  const [skipHoldProgress, setSkipHoldProgress] = useState(0);
-  const [skipHolding, setSkipHolding] = useState(false);
-  const [skipConfirmed, setSkipConfirmed] = useState(false);
-  const [skipSource, setSkipSource] = useState<"button" | "keyboard" | null>(
-    null,
-  );
-  const holdDurationMs = 1200;
-  const holdStartRef = useRef<number | null>(null);
-  const holdRafRef = useRef<number | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const ambientRef = useRef<{
-    ctx: AudioContext;
-    gain: GainNode;
-    hp: BiquadFilterNode;
-    lp: BiquadFilterNode;
-    o1: OscillatorNode;
-    o2: OscillatorNode;
-    lfo: OscillatorNode;
-    lfoGain: GainNode;
-  } | null>(null);
+  const [idleFrame, setIdleFrame] = useState(1);
+  const [finished, setFinished] = useState(false);
 
   const step = STEPS[Math.min(stepIndex, STEPS.length - 1)];
-  const totalDuration = useMemo(
-    () => STEPS.reduce((a, b) => a + b.durationMs, 0),
-    [],
-  );
-  const elapsedTotal = useMemo(() => {
-    const prev = STEPS.slice(0, stepIndex).reduce(
-      (a, b) => a + b.durationMs,
-      0,
-    );
-    return Math.min(totalDuration, prev + stepElapsed);
-  }, [stepIndex, stepElapsed, totalDuration]);
+
+  // ANIMATION: Constant Idle Loop
+  useEffect(() => {
+    const itv = setInterval(() => {
+      setIdleFrame(f => (f % 12) + 1);
+    }, 120);
+    return () => clearInterval(itv);
+  }, []);
 
   useEffect(() => {
     if (!visible) return;
     setStarted(false);
     setStepIndex(0);
-    setStepElapsed(0);
-    setSkipHoldProgress(0);
-    setSkipHolding(false);
-    setSkipConfirmed(false);
-    setSkipSource(null);
+    setDetailIndex(-1);
     setTypedBubble("");
-    setShutterPhase("opening");
-    holdStartRef.current = null;
-    if (holdRafRef.current) {
-      cancelAnimationFrame(holdRafRef.current);
-      holdRafRef.current = null;
-    }
+    setFinished(false);
     const t = setTimeout(() => setStarted(true), 320);
     return () => clearTimeout(t);
   }, [visible]);
@@ -179,321 +137,43 @@ export default function PreFarmTutorial({
     onMapFocus?.(step.map);
   }, [visible, started, step.map, onMapFocus]);
 
+  // TYPING EFFECT
   useEffect(() => {
-    if (!visible || !started) return;
+    const coords = detailIndex === -1 ? { top: '50%', left: '50%' } : step.detailPointers[detailIndex];
+    if (!coords) return;
+    
     setTypedBubble("");
     let i = 0;
-    const text = step.bubble;
+    const text = detailIndex === -1 ? step.bubble : step.details[detailIndex];
+    if (!text) return;
     const t = setInterval(() => {
       i += 1;
       setTypedBubble(text.slice(0, i));
       if (i >= text.length) clearInterval(t);
-    }, 22);
+    }, 18);
     return () => clearInterval(t);
-  }, [visible, started, stepIndex, step.bubble]);
+  }, [visible, started, stepIndex, detailIndex, step.bubble, step.details, step.detailPointers]);
 
-  useEffect(() => {
-    if (!visible || !started) return;
-
-    let raf = 0;
-    let last = performance.now();
-
-    const tick = (now: number) => {
-      const dt = now - last;
-      last = now;
-      setStepElapsed((v) => v + dt);
-      setBubblePulse((p) => p + dt * 0.0032);
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [visible, started]);
-
-  useEffect(() => {
-    if (!visible || !started) return;
-    if (stepElapsed < step.durationMs) return;
-
-    if (stepIndex < STEPS.length - 1) {
-      if (shutterPhase !== "idle") return;
-      setShutterPhase("closing");
-      const t = setTimeout(() => {
-        setStepIndex((i) => i + 1);
-        setStepElapsed(0);
-        setShutterPhase("opening");
-      }, 320);
-      return () => clearTimeout(t);
-    }
-
-    const t = setTimeout(() => {
-      if (visible) onFinished();
-    }, 560);
-    return () => clearTimeout(t);
-  }, [
-    visible,
-    started,
-    stepElapsed,
-    step.durationMs,
-    stepIndex,
-    onFinished,
-    shutterPhase,
-  ]);
-
-  const startAmbientBed = () => {
-    try {
-      if (ambientRef.current) return;
-      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = audioCtxRef.current || new Ctx();
-      audioCtxRef.current = ctx;
-
-      const o1 = ctx.createOscillator();
-      const o2 = ctx.createOscillator();
-      const hp = ctx.createBiquadFilter();
-      const lp = ctx.createBiquadFilter();
-      const gain = ctx.createGain();
-      const lfo = ctx.createOscillator();
-      const lfoGain = ctx.createGain();
-
-      o1.type = "sine";
-      o2.type = "triangle";
-      o1.frequency.setValueAtTime(82, ctx.currentTime);
-      o2.frequency.setValueAtTime(123, ctx.currentTime);
-
-      hp.type = "highpass";
-      hp.frequency.setValueAtTime(55, ctx.currentTime);
-
-      lp.type = "lowpass";
-      lp.frequency.setValueAtTime(820, ctx.currentTime);
-
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.014, ctx.currentTime + 1.05);
-
-      lfo.type = "sine";
-      lfo.frequency.setValueAtTime(0.06, ctx.currentTime);
-      lfoGain.gain.setValueAtTime(0.0065, ctx.currentTime);
-
-      o1.connect(hp);
-      o2.connect(hp);
-      hp.connect(lp);
-      lp.connect(gain);
-      gain.connect(ctx.destination);
-
-      lfo.connect(lfoGain);
-      lfoGain.connect(gain.gain);
-
-      o1.start();
-      o2.start();
-      lfo.start();
-
-      ambientRef.current = { ctx, gain, hp, lp, o1, o2, lfo, lfoGain };
-    } catch {
-      // ignore ambient errors silently
-    }
-  };
-
-  const stopAmbientBed = () => {
-    try {
-      const a = ambientRef.current;
-      if (!a) return;
-      const t = a.ctx.currentTime;
-      a.gain.gain.cancelScheduledValues(t);
-      a.gain.gain.setValueAtTime(Math.max(0.0001, a.gain.gain.value), t);
-      a.gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-      a.o1.stop(t + 0.38);
-      a.o2.stop(t + 0.38);
-      a.lfo.stop(t + 0.38);
-      setTimeout(() => {
-        ambientRef.current = null;
-      }, 420);
-    } catch {
-      // ignore ambient errors silently
-    }
-  };
-
-  const playStepWhoosh = () => {
-    try {
-      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = audioCtxRef.current || new Ctx();
-      audioCtxRef.current = ctx;
-
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(180, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(70, ctx.currentTime + 0.2);
-
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(2200, ctx.currentTime);
-      filter.frequency.exponentialRampToValueAtTime(700, ctx.currentTime + 0.2);
-
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.03, ctx.currentTime + 0.028);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.26);
-
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start();
-      osc.stop(ctx.currentTime + 0.24);
-    } catch {
-      // ignore audio errors silently
-    }
-  };
-
-  const playSkipConfirmSound = () => {
-    try {
-      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!Ctx) return;
-      const ctx = audioCtxRef.current || new Ctx();
-      audioCtxRef.current = ctx;
-
-      const o1 = ctx.createOscillator();
-      const o2 = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      o1.type = "triangle";
-      o2.type = "sine";
-      o1.frequency.setValueAtTime(620, ctx.currentTime);
-      o1.frequency.exponentialRampToValueAtTime(900, ctx.currentTime + 0.09);
-      o2.frequency.setValueAtTime(310, ctx.currentTime);
-      o2.frequency.exponentialRampToValueAtTime(450, ctx.currentTime + 0.09);
-
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.055, ctx.currentTime + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.19);
-
-      o1.connect(gain);
-      o2.connect(gain);
-      gain.connect(ctx.destination);
-
-      o1.start();
-      o2.start();
-      o1.stop(ctx.currentTime + 0.2);
-      o2.stop(ctx.currentTime + 0.2);
-    } catch {
-      // ignore audio errors silently
-    }
-  };
-
-  const commitSkip = (source: "button" | "keyboard") => {
-    if (!visible || skipConfirmed) return;
-    setSkipConfirmed(true);
-    setSkipHolding(false);
-    setSkipHoldProgress(1);
-    setSkipSource(source);
-    playSkipConfirmSound();
-    setTimeout(() => {
-      if (visible) onFinished();
-    }, 220);
-  };
-
-  useEffect(() => {
-    if (!visible || !started) return;
-    if (shutterPhase === "closing") {
-      playStepWhoosh();
+  const handleNext = () => {
+    if (detailIndex < step.details.length - 1) {
+      setDetailIndex(d => d + 1);
       return;
     }
-    if (shutterPhase === "opening") {
-      const t = setTimeout(() => setShutterPhase("idle"), 340);
-      return () => clearTimeout(t);
+    if (stepIndex < STEPS.length - 1) {
+      setStepIndex(i => i + 1);
+      setDetailIndex(-1);
+      return;
     }
-    return;
-  }, [shutterPhase, visible, started]);
-
-  const cancelSkipHold = () => {
-    setSkipHolding(false);
-    holdStartRef.current = null;
-    if (holdRafRef.current) {
-      cancelAnimationFrame(holdRafRef.current);
-      holdRafRef.current = null;
-    }
+    setFinished(true);
+    onFinished();
   };
 
-  const startSkipHold = (source: "button" | "keyboard") => {
-    if (!visible || skipConfirmed) return;
-    if (skipHolding) return;
-
-    setSkipSource(source);
-    setSkipHolding(true);
-    holdStartRef.current = performance.now();
-
-    const tick = (now: number) => {
-      if (!holdStartRef.current) return;
-      const elapsed = now - holdStartRef.current;
-      const p = Math.max(0, Math.min(1, elapsed / holdDurationMs));
-      setSkipHoldProgress(p);
-      if (p >= 1) {
-        commitSkip(source);
-        cancelSkipHold();
-        return;
-      }
-      holdRafRef.current = requestAnimationFrame(tick);
-    };
-
-    holdRafRef.current = requestAnimationFrame(tick);
+  const handleSkip = () => {
+    setFinished(true);
+    onFinished();
   };
 
-  useEffect(() => {
-    if (!visible) return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (skipConfirmed) return;
-      const key = e.key.toLowerCase();
-      if (key === "enter" || key === "k") {
-        e.preventDefault();
-        if (!skipHolding) {
-          startSkipHold("keyboard");
-        }
-      }
-    };
-
-    const onKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (key === "enter" || key === "k") {
-        e.preventDefault();
-        if (!skipConfirmed) {
-          setSkipHoldProgress(0);
-          cancelSkipHold();
-        }
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, [visible, skipHolding, skipConfirmed]);
-
-  useEffect(() => {
-    if (!visible || !started) return;
-    startAmbientBed();
-    return () => {
-      stopAmbientBed();
-    };
-  }, [visible, started]);
-
-  useEffect(() => {
-    return () => {
-      if (holdRafRef.current) {
-        cancelAnimationFrame(holdRafRef.current);
-      }
-      stopAmbientBed();
-    };
-  }, []);
-
-  if (!visible) return null;
-
-  const stepProgress = Math.max(0, Math.min(1, stepElapsed / step.durationMs));
-  const totalProgress = Math.max(0, Math.min(1, elapsedTotal / totalDuration));
-  const pulse = 0.88 + Math.sin(bubblePulse) * 0.12;
+  if (!visible || finished) return null;
 
   return (
     <div
@@ -507,428 +187,259 @@ export default function PreFarmTutorial({
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-
-        @keyframes pft-fadein {
-          from { opacity: 0; transform: scale(1.02); }
-          to { opacity: 1; transform: scale(1); }
-        }
-
-        @keyframes pft-scan {
-          0% { transform: translateY(-120%); opacity: 0; }
-          20% { opacity: 0.4; }
-          100% { transform: translateY(220%); opacity: 0; }
-        }
-
         @keyframes pft-float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-4px); }
+          0%, 100% { transform: translate(-50%, -50%) translateY(0px); }
+          50% { transform: translate(-50%, -50%) translateY(-10px); }
         }
-
-        @keyframes pft-caret-blink {
-          0%, 45% { opacity: 1; }
-          46%, 100% { opacity: 0; }
-        }
-
-        .pft-btn {
-          font-family: 'Press Start 2P', 'Courier New', monospace;
-          background: linear-gradient(180deg, #CE9E64 0%, #8D5A32 100%);
-          border: 3px solid #5C4033;
-          border-radius: 999px;
-          color: #FFF5E0;
+        .stardew-btn {
+          font-family: 'Press Start 2P', monospace;
+          background: #5C4033;
+          border: 4px solid #8B5E3C;
+          color: #FFD700;
+          padding: 8px 16px;
+          border-radius: 4px;
           cursor: pointer;
-          box-shadow: 0 4px 0 #3a2212, inset 0 1px 1px rgba(255,255,255,0.45);
-          transition: all 0.08s ease;
-          padding: 10px 16px;
           font-size: 8px;
-          text-shadow: 1px 1px 1px #000;
-          letter-spacing: 0.4px;
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
+          box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
         }
-        .pft-btn:hover {
-          background: linear-gradient(180deg, #D9B380 0%, #AD7D54 100%);
-          transform: translateY(-2px);
-          box-shadow: 0 6px 0 #3a2212;
+        .stardew-btn:hover { background: #8B5E3C; color: #FFF; }
+        .stardew-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(0,0,0,0.3); }
+        
+        .hud-tray {
+          background: linear-gradient(180deg, #A07844 0%, #7B502C 100%);
+          padding: 10px 18px;
+          border-radius: 40px;
+          border: 4px solid #5C4033;
+          box-shadow: 0 10px 0 rgba(0,0,0,0.5), inset 0 2px 8px rgba(255,255,255,0.25);
+          display: flex; gap: 8px;
+          position: absolute;
+          bottom: 25px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 10;
         }
-        .pft-btn:active {
-          transform: translateY(2px);
-          box-shadow: 0 2px 0 #3a2212;
+        .hud-slot {
+          width: 52px; height: 52px;
+          background: linear-gradient(135deg, #8B5E3C 0%, #5E3A24 100%);
+          border: 3px solid #4D2D18;
+          border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          position: relative;
         }
-        .pft-btn[aria-busy="true"] {
-          background: linear-gradient(180deg, #D9B380 0%, #AD7D54 100%);
+        .hud-header {
+          position: absolute; top: 15px; left: 15px;
+          background: rgba(0,0,0,0.6);
+          border: 3px solid #5C4033;
+          border-radius: 12px;
+          padding: 10px 20px;
+          color: #FFD700;
+          font-family: 'Press Start 2P', monospace;
+          font-size: 8px;
+          z-index: 10;
         }
       `}</style>
 
-      <div
-        style={{
-          position: "absolute",
-          inset: -22,
-          backgroundImage: `url(${MAP_BG[step.map]})`,
-          backgroundSize: "cover",
-          backgroundPosition: `${50 + Math.sin(bubblePulse * 0.45) * 1.1}% ${50 + Math.cos(bubblePulse * 0.35) * 0.9}%`,
-          transform: `scale(1.04) translate(${Math.sin(bubblePulse * 0.22) * 4}px, ${Math.cos(bubblePulse * 0.19) * 3}px)`,
-          filter:
-            "brightness(0.34) saturate(0.88) contrast(1.08) hue-rotate(-2deg)",
-          animation: "pft-fadein 520ms ease",
-          transition:
-            "transform 220ms linear, background-position 220ms linear",
-        }}
-      />
-
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background:
-            "radial-gradient(circle at 50% 45%, rgba(255,245,210,0.12) 0%, rgba(0,0,0,0.8) 72%)",
-        }}
-      />
-
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background:
-            "linear-gradient(180deg, rgba(12,8,6,0.56) 0%, rgba(0,0,0,0.8) 100%)",
-        }}
-      />
-
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: "none",
-          zIndex: 4,
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            top: 0,
-            height:
-              shutterPhase === "closing"
-                ? "50%"
-                : shutterPhase === "opening"
-                  ? "0%"
-                  : "0%",
-            background: "linear-gradient(180deg, #2f1b0f 0%, #120a06 100%)",
-            borderBottom: "3px solid #5C4033",
-            transition: "height 240ms ease",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height:
-              shutterPhase === "closing"
-                ? "50%"
-                : shutterPhase === "opening"
-                  ? "0%"
-                  : "0%",
-            background: "linear-gradient(0deg, #2f1b0f 0%, #120a06 100%)",
-            borderTop: "3px solid #5C4033",
-            transition: "height 240ms ease",
-          }}
-        />
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          top: 16,
-          left: 16,
-          right: 16,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          color: "#FFF4CF",
-          fontFamily: "'Press Start 2P', monospace",
-          fontSize: 8,
-          textShadow: "0 2px 6px rgba(0,0,0,1)",
-          letterSpacing: 1,
-        }}
-      >
-        <div
-          style={{
-            padding: "10px 14px",
-            border: "3px solid #5C4033",
-            borderRadius: 12,
-            background: "linear-gradient(180deg, #CE9E64 0%, #8D5A32 100%)",
-            boxShadow: "0 4px 0 #3a2212, inset 0 1px 2px rgba(255,255,255,0.3)",
-          }}
-        >
-          PRE-FARM BRIEFING
-        </div>
-
-        <div
-          style={{
-            padding: "10px 14px",
-            border: "3px solid #5C4033",
-            borderRadius: 12,
-            background: "linear-gradient(180deg, #CE9E64 0%, #8D5A32 100%)",
-            color: "#FFE082",
-          }}
-        >
-          STEP {stepIndex + 1}/{STEPS.length}
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: "absolute",
-          left: "50%",
-          bottom: 28,
-          transform: "translateX(-50%)",
-          width: 1100,
-          maxWidth: "calc(100% - 36px)",
-          border: "4px solid #5C4033",
-          borderRadius: 18,
-          background: "linear-gradient(180deg, #B98755 0%, #7D4D2B 100%)",
-          boxShadow:
-            "0 10px 0 rgba(40,20,10,0.8), inset 0 2px 8px rgba(255,255,255,0.25), 0 20px 50px rgba(0,0,0,0.8)",
-          padding: 16,
-          color: "#FFF4CF",
-          fontFamily: "'Press Start 2P', monospace",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
-          <div
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: "50%",
-              border: "3px solid #5C4033",
-              background: "linear-gradient(180deg, #D4AF37 0%, #8D5A32 100%)",
-              boxShadow:
-                "0 4px 0 #3a2212, inset 0 1px 2px rgba(255,255,255,0.35)",
-              display: "grid",
-              placeItems: "center",
-              fontSize: 18,
-              lineHeight: 1,
-              animation: "pft-float 2.2s ease-in-out infinite",
-            }}
-          >
-            {MAP_ICON[step.map]}
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: step.color,
-              textShadow: "0 2px 7px rgba(0,0,0,0.8)",
-              animation: "pft-float 2.2s ease-in-out infinite",
-            }}
-          >
-            {step.title}
-          </div>
-        </div>
-
-        <div
-          style={{
-            position: "relative",
-            border: "3px solid #5C4033",
-            borderRadius: 14,
-            background: "rgba(43, 26, 13, 0.82)",
-            padding: "14px 14px 16px",
-            marginBottom: 12,
-            overflow: "hidden",
-          }}
-        >
+      {/* BACKGROUND MAP WITH DYNAMIC CAMERA FOCUS */}
+      {(() => {
+        const coords = detailIndex === -1 ? { top: '50%', left: '50%' } : step.detailPointers[detailIndex];
+        const isToolFocus = coords && parseInt(coords.top) > 80;
+        const isSideFocus = coords && (parseInt(coords.left) < 30 || parseInt(coords.left) > 70);
+        const isDialogTop = coords && parseInt(coords.top) > 75;
+        
+        return (
           <div
             style={{
               position: "absolute",
-              top: -40,
-              left: 0,
-              right: 0,
-              bottom: -40,
-              background:
-                "linear-gradient(120deg, transparent 20%, rgba(255,255,255,0.26) 50%, transparent 80%)",
-              animation: "pft-scan 2.4s linear infinite",
+              inset: 0,
+              backgroundImage: `url(${MAP_BG[step.map] || MAP_BG.home})`,
+              backgroundSize: "cover",
+              backgroundPosition: isToolFocus ? "center 90%" : isSideFocus ? `${coords?.left} center` : "center",
+              transform: isToolFocus || isSideFocus ? "scale(1.15)" : "scale(1.05)",
+              filter: isToolFocus || isSideFocus ? "brightness(1.05) contrast(1.02)" : "none",
+              transition: "all 0.8s cubic-bezier(0.4, 0, 0.2, 1)",
             }}
           />
-          <div
-            style={{
-              position: "relative",
-              fontSize: 8,
-              lineHeight: "1.9",
-              transform: `scale(${pulse})`,
-              transformOrigin: "left center",
-              transition: "transform 120ms linear",
-              color: "#FFF8E8",
-              textShadow: "0 1px 3px rgba(0,0,0,0.9)",
-              minHeight: 38,
-            }}
-          >
-            {typedBubble}
-            <span
-              style={{
-                display:
-                  typedBubble.length < step.bubble.length
-                    ? "inline-block"
-                    : "none",
-                marginLeft: 4,
-                width: 6,
-                animation: "pft-caret-blink 1s steps(1,end) infinite",
-              }}
-            >
-              |
-            </span>
-          </div>
-        </div>
+        );
+      })()}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 10,
-            marginBottom: 12,
-          }}
-        >
-          {step.details.map((line, i) => (
-            <div
-              key={line + i}
-              style={{
-                border: "2px solid #5C4033",
-                borderRadius: 10,
-                background: "rgba(60,35,20,0.65)",
-                padding: "10px 10px",
-                fontSize: 7,
-                lineHeight: "1.7",
-                color: "#F9EED2",
-              }}
-            >
-              {line}
-            </div>
-          ))}
+      {/* AUTHENTIC GAME HUD OVERLAY */}
+      {/* hud-header REMOVED as requested */}
+      
+      {/* MAP-SPECIFIC SHOP BUTTON (Only in City) */}
+      {step.map === "city" && (
+        <div style={{
+          position: 'absolute',
+          bottom: 120,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'linear-gradient(180deg, #CE9E64 0%, #8D5A32 100%)',
+          border: '4px solid #5C4033',
+          color: '#FFF5E0',
+          padding: '12px 24px',
+          borderRadius: 12,
+          fontFamily: "'Press Start 2P', monospace",
+          fontSize: 10,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
+          zIndex: 10,
+          animation: 'pft-float 1s ease-in-out infinite alternate'
+        }}>
+          [ E ] VISIT SHOP
         </div>
+      )}
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 7,
-              color: "#F9EED2",
-              lineHeight: "1.7",
-            }}
-          >
-            Auto-running world briefing. Hold to skip while preserving state.
-            Use and hold ENTER or K, or hold the button.
-          </div>
-          <button
-            type="button"
-            className="pft-btn"
-            aria-busy={skipHolding ? "true" : "false"}
-            onMouseDown={() => startSkipHold("button")}
-            onMouseUp={() => {
-              if (!skipConfirmed) {
-                setSkipHoldProgress(0);
-                cancelSkipHold();
-              }
-            }}
-            onMouseLeave={() => {
-              if (!skipConfirmed) {
-                setSkipHoldProgress(0);
-                cancelSkipHold();
-              }
-            }}
-            onTouchStart={() => startSkipHold("button")}
-            onTouchEnd={() => {
-              if (!skipConfirmed) {
-                setSkipHoldProgress(0);
-                cancelSkipHold();
-              }
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 42 42" aria-hidden="true">
-              <circle
-                cx="21"
-                cy="21"
-                r="16"
-                fill="none"
-                stroke="rgba(0,0,0,0.45)"
-                strokeWidth="6"
-              />
-              <circle
-                cx="21"
-                cy="21"
-                r="16"
-                fill="none"
-                stroke={skipConfirmed ? "#B8E85C" : "#FFE082"}
-                strokeWidth="6"
-                strokeLinecap="round"
-                strokeDasharray={`${Math.max(0.001, skipHoldProgress * 100)} 100`}
-                transform="rotate(-90 21 21)"
-              />
-            </svg>
-            {skipConfirmed
-              ? "SKIP CONFIRMED"
-              : skipHolding
-                ? `HOLDING ${Math.floor(skipHoldProgress * 100)}%`
-                : "HOLD TO SKIP"}
-          </button>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          <div
-            style={{
-              height: 14,
-              borderRadius: 999,
-              border: "2px solid #5C4033",
-              overflow: "hidden",
-              background: "rgba(20,10,5,0.72)",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.floor(totalProgress * 100)}%`,
-                height: "100%",
-                background:
-                  "linear-gradient(90deg, #7AC943 0%, #D9F871 55%, #8BC34A 100%)",
-                boxShadow: "0 0 14px rgba(173,255,95,0.58)",
-                transition: "width 140ms linear",
-              }}
-            />
-          </div>
-          <div
-            style={{
-              height: 8,
-              borderRadius: 999,
-              border: "2px solid #5C4033",
-              overflow: "hidden",
-              background: "rgba(20,10,5,0.58)",
-            }}
-          >
-            <div
-              style={{
-                width: `${Math.floor(stepProgress * 100)}%`,
-                height: "100%",
-                background: `linear-gradient(90deg, ${step.color} 0%, #FFFFFF 100%)`,
-                transition: "width 140ms linear",
-              }}
-            />
-          </div>
-        </div>
+      <div className="hud-tray">
+        <div className="hud-slot" style={{ borderColor: '#FFD700' }}><img src="/celurit_1774349990712.png" style={{ width: 34 }} /></div>
+        <div className="hud-slot"><img src="/kapak_1_1774349990715.png" style={{ width: 34 }} /></div>
+        <div className="hud-slot"><img src="/teko_siram.png" style={{ width: 34 }} /></div>
+        <div className="hud-slot"><img src="/wheat.png" style={{ width: 34 }} /></div>
+        <div className="hud-slot"><img src="/tomato.png" style={{ width: 34 }} /></div>
+        <div className="hud-slot"><img src="/carrot.png" style={{ width: 34 }} /></div>
       </div>
+
+      {/* MAP INTEREST POINT */}
+      {(() => {
+        const coords = detailIndex === -1 ? null : step.detailPointers[detailIndex];
+        if (!coords) return null;
+        return (
+          <div
+            className="pft-finger-pointer"
+            style={{
+              position: 'absolute',
+              top: coords.top,
+              left: coords.left,
+              zIndex: 3,
+              animation: 'pft-float 1.2s ease-in-out infinite alternate',
+              pointerEvents: 'none',
+              transition: 'all 0.4s ease',
+              marginTop: -30,
+              marginLeft: -30,
+              // Use a hand/finger emoji pointing if Kapak is too weird
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 60,
+              filter: 'drop-shadow(0 0 20px #FFD700)',
+            }}
+          >
+            <img 
+               src="/tangan.png" 
+               style={{ 
+                 width: 80, 
+                 height: 80, 
+                 imageRendering: 'pixelated',
+                 transform: 'rotate(-45deg)',
+                 filter: 'drop-shadow(0 0 15px #FFD700)'
+               }} 
+            />
+          </div>
+        );
+      })()}
+
+      {/* STARDEW VALLEY DIALOGUE BOX WITH SMART REPOSITIONING */}
+      {(() => {
+        const coords = detailIndex === -1 ? { top: '50%', left: '50%' } : step.detailPointers[detailIndex];
+        const isBottomFocus = coords && parseInt(coords.top) > 75;
+        
+        return (
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: isBottomFocus ? 40 : "auto",
+              bottom: isBottomFocus ? "auto" : 40,
+              transform: "translateX(-50%)",
+              width: 1100,
+              maxHeight: 280,
+              background: "#f4c692", 
+              border: "8px solid #5C4033", 
+              borderRadius: 4,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.8), inset 0 0 0 4px #8B5E3C",
+              display: "flex",
+              zIndex: 100,
+              overflow: "hidden",
+              transition: "all 0.6s cubic-bezier(0.18, 0.89, 0.32, 1.28)" // Bouncy transition
+            }}
+          >
+            <div style={{ width: 12, background: '#4a2c1a', borderRight: '4px solid #8B5E3C' }} />
+
+            {/* DIALOGUE AREA */}
+            <div style={{ flex: 1, padding: "30px", position: "relative", display: 'flex', flexDirection: 'column' }}>
+              <div style={{
+                  flex: 1,
+                  fontSize: 14,
+                  lineHeight: "1.8",
+                  fontFamily: "'Press Start 2P', monospace",
+                  color: "#3a2212",
+                  textShadow: "1px 1px 0 rgba(255,255,255,0.4)"
+                }}>
+                {typedBubble}
+              </div>
+
+              <div style={{ display: 'flex', gap: 15, justifyContent: 'flex-end', marginTop: 10, position: 'relative', bottom: -10 }}>
+                <button className="stardew-btn" onClick={handleSkip}>SKIP</button>
+                <button className="stardew-btn" onClick={handleNext}>NEXT &gt;</button>
+              </div>
+            </div>
+
+            {/* ANIMATED CHARACTER PORTRAIT BOX */}
+            <div style={{ 
+                width: 250, 
+                borderLeft: '8px solid #5C4033', 
+                background: '#e0b080',
+                display: 'flex',
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                position: "relative"
+            }}>
+              <div style={{ 
+                background: '#f4c692', 
+                padding: 10, 
+                border: '4px solid #5C4033',
+                borderRadius: 4,
+                marginBottom: 10,
+                overflow: 'hidden',
+                width: 160,
+                height: 160,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                {/* POINTING LOGIC: Use menanam_frames for home, characters for others */}
+                <img 
+                   src={(() => {
+                     if (step.id === "home") {
+                        const farmFrames = ["/farm_till.png", "/farm_plant.png", "/farm_water.png", "/farm_harvest.png"];
+                        return farmFrames[detailIndex] || "/player_idle.png";
+                     } else {
+                        // For City/Mancing: use Hai/Wave pose from characters
+                        return detailIndex === -1 ? "/player_idle.png" : "/player_wave.png";
+                     }
+                   })()} 
+                   style={{ 
+                     height: 140, 
+                     imageRendering: 'pixelated',
+                     transform: detailIndex === -1 ? 'scale(1.2)' : 'scale(1.3) translateX(-5px)',
+                     transition: 'all 0.3s ease'
+                   }} 
+                />
+              </div>
+              <div style={{
+                 background: '#3a2212',
+                 color: '#FFF5E0',
+                 padding: '4px 20px',
+                 fontFamily: "'Press Start 2P', monospace",
+                 fontSize: 9,
+                 borderRadius: 4
+              }}>
+                CHIBI: INFO
+              </div>
+            </div>
+
+            <div style={{ width: 12, background: '#4a2c1a', borderLeft: '4px solid #8B5E3C' }} />
+          </div>
+        );
+      })()}
     </div>
   );
 }

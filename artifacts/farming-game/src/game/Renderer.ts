@@ -88,6 +88,8 @@ export function preloadAssets() {
       "/jalan_kaki_11_akhir_langkah.png",
       "/jalan_kaki_1_berdiri_awal.png",
       "/jalan_kaki_12_siap_berhenti.png",
+      "/ikan.png",
+      "/tangan.png",
     ].map(loadImg),
   );
 }
@@ -190,6 +192,7 @@ function drawFarmPlots(ctx: CanvasRenderingContext2D, state: GameState) {
     const drawY = FARM_GRID.startY + plot.gridY * cellH;
     const cx = drawX + cellW / 2;
     const isNearest = plot.id === nearestPlotId && !!state.player.tool;
+    const tool = state.player.tool;
 
     ctx.save();
     // Grid Helper: Always show a faint outline for interactive plots
@@ -200,67 +203,74 @@ function drawFarmPlots(ctx: CanvasRenderingContext2D, state: GameState) {
     ctx.stroke();
 
     if (plot.tilled) {
-      // Base soil color - more vibrant
-      ctx.fillStyle = plot.watered ? "#3D2B1F" : "#5D4037";
-      roundRect(ctx, drawX + 1, drawY + 1, cellW - 2, cellH - 2, 4);
+      // Base soil color - Deep rich Harvest Moon brown
+      ctx.fillStyle = plot.watered ? "#352212" : "#5C4033";
+      roundRect(ctx, drawX + 1, drawY + 1, cellW - 2, cellH - 2, 6);
       ctx.fill();
+      
+      // Soil border for definition
+      ctx.strokeStyle = plot.watered ? "#1a0f08" : "#3D2B1F";
+      ctx.lineWidth = 1;
+      roundRect(ctx, drawX + 1, drawY + 1, cellW - 2, cellH - 2, 6);
+      ctx.stroke();
 
-      // Soil row lines
-      ctx.strokeStyle = plot.watered ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.2)";
-      ctx.lineWidth = 1.5;
-      for (let r = 1; r <= 3; r++) {
-        const ry = drawY + 2 + (r * (cellH - 4)) / 4;
+      // Fertilized indicator (vibrant particles)
+      if (plot.fertilized) {
+        ctx.fillStyle = "rgba(120, 255, 120, 0.6)";
+        for (let i = 0; i < 4; i++) {
+          const sx = drawX + 10 + (Math.sin(now/200 + i) * 20 + 20) % (cellW - 20);
+          const sy = drawY + 10 + (Math.cos(now/300 + i*1.2) * 15 + 15) % (cellH - 20);
+          ctx.beginPath();
+          ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Soil texture lines
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.lineWidth = 1;
+      for (let r = 1; r <= 2; r++) {
+        const ry = drawY + (r * cellH) / 3;
         ctx.beginPath();
-        ctx.moveTo(drawX + 4, ry);
-        ctx.lineTo(drawX + cellW - 4, ry);
+        ctx.moveTo(drawX + 8, ry);
+        ctx.lineTo(drawX + cellW - 8, ry);
         ctx.stroke();
       }
 
-      // If crop is growing — add rough/cracked texture on soil
-      if (plot.crop) {
-        const prog = Math.min(
-          (Date.now() - plot.crop.plantedAt) / (plot.crop.growTime || 60000),
-          1,
-        );
-        // Crack lines that appear as plant grows
-        const crackCount = Math.floor(prog * 5) + 1;
-        ctx.strokeStyle = "rgba(0,0,0,0.3)";
-        ctx.lineWidth = 0.8;
-        // Deterministic cracks based on plot id hash
-        const seed = plot.gridX * 7 + plot.gridY * 13;
-        for (let c = 0; c < crackCount; c++) {
-          const sx = drawX + 6 + ((seed * (c + 1) * 17) % (cellW - 12));
-          const sy = drawY + 8 + ((seed * (c + 1) * 11) % (cellH - 16));
+      // Water droplets texture if watered
+      if (plot.watered) {
+        ctx.fillStyle = "rgba(100, 180, 255, 0.4)";
+        for (let i = 0; i < 4; i++) {
+          const dx = drawX + 15 + (i * 20) % (cellW - 25);
+          const dy = drawY + 10 + (i * 15) % (cellH - 25);
           ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(
-            sx + ((seed * c * 5) % 10) - 5,
-            sy + ((seed * c * 3) % 8) - 4,
-          );
-          ctx.stroke();
-        }
-        // Small soil clumps
-        ctx.fillStyle = "rgba(80,40,10,0.35)";
-        for (let c = 0; c < crackCount; c++) {
-          const bx2 = drawX + 8 + ((seed * (c + 3) * 9) % (cellW - 16));
-          const by2 = drawY + 10 + ((seed * (c + 2) * 7) % (cellH - 20));
-          ctx.beginPath();
-          ctx.ellipse(bx2, by2, 3, 2, (seed * c) % Math.PI, 0, Math.PI * 2);
+          ctx.arc(dx, dy, 2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
     } else if (isNearest) {
-      ctx.strokeStyle = "rgba(255,220,100,0.3)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      roundRect(ctx, drawX + 2, drawY + 2, cellW - 4, cellH - 4, 4);
+      // ... same highlight logic
+      let highlightColor = "rgba(255,220,100,0.45)"; 
+      if (tool === "water") highlightColor = "rgba(100,200,255,0.5)";
+      else if (tool === "fertilizer") highlightColor = "rgba(180,100,255,0.5)";
+      else if (tool === "hoe" || tool === "shovel" || tool === "sickle") highlightColor = "rgba(160,110,80,0.5)";
+      else if (tool?.endsWith("-seed")) highlightColor = "rgba(150,255,100,0.5)";
+
+      ctx.strokeStyle = highlightColor;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 3]);
+      roundRect(ctx, drawX + 2, drawY + 2, cellW - 4, cellH - 4, 8);
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    // Nearest tilled: thin white outline only
+    // Nearest tilled selection indicator
     if (isNearest && plot.tilled) {
-      ctx.strokeStyle = "rgba(255,255,255,0.28)";
+      let selColor = "rgba(255,255,255,0.3)";
+      if (tool === "water") selColor = "rgba(100,200,255,0.5)";
+      else if (tool?.endsWith("-seed")) selColor = "rgba(150,255,100,0.5)";
+      
+      ctx.strokeStyle = selColor;
       ctx.lineWidth = 1.5;
       roundRect(ctx, drawX + 1, drawY + 1, cellW - 2, cellH - 2, 4);
       ctx.stroke();
@@ -293,10 +303,11 @@ function drawFarmPlots(ctx: CanvasRenderingContext2D, state: GameState) {
       const img = imgs[imgId];
       if (imgId && !imgs[imgId]) loadImg(imgId);
 
-      const by = drawY + cellH - 4;
-      const stageScales = [0.35, 0.55, 0.75, 0.92, 1.08];
-      const stageYOffsets = [10, 7, 4, 1, -2];
-      const stageImageSizes = [20, 28, 34, 40, 46];
+      // Offset the 'base y' slightly higher to center it better in the grid cell
+      const by = drawY + cellH - 12; // Moved up from -4
+      const stageScales = [0.45, 0.65, 0.85, 1.0, 1.2]; 
+      const stageYOffsets = [8, 5, 2, 0, -5];
+      const stageImageSizes = [32, 40, 48, 56, 64]; // Substantially larger
       const currentStage = Math.max(0, Math.min(4, crop.stage));
       const baseScale = stageScales[currentStage];
       const baseYOffset = stageYOffsets[currentStage];
@@ -307,69 +318,45 @@ function drawFarmPlots(ctx: CanvasRenderingContext2D, state: GameState) {
       let shadowScaleX = 1;
       if (crop.ready) {
         const t = now / 600;
-        tiltAngle = Math.sin(t) * 0.18;
-        scale = baseScale + Math.abs(Math.sin(t * 1.3)) * 0.06;
-        shadowScaleX = 1 + Math.abs(Math.sin(t)) * 0.15;
+        tiltAngle = Math.sin(t) * 0.15;
+        scale = baseScale + Math.abs(Math.sin(t * 1.3)) * 0.1;
+        shadowScaleX = 1 + Math.abs(Math.sin(t)) * 0.2;
       }
 
       // Soil contact shadow for every stage
       ctx.save();
-      ctx.globalAlpha = crop.ready ? 0.24 : 0.14;
+      ctx.globalAlpha = crop.ready ? 0.35 : 0.2;
       ctx.fillStyle = "#000";
-      ctx.scale(shadowScaleX, 0.34);
+      ctx.scale(shadowScaleX, 0.35);
       ctx.beginPath();
-      ctx.ellipse(
-        cx / shadowScaleX,
-        (by + 2 + baseYOffset) / 0.34,
-        (7 + currentStage * 2) * scale,
-        3 + currentStage * 0.35,
-        0,
-        0,
-        Math.PI * 2,
-      );
+      ctx.ellipse(cx / shadowScaleX, (by + 4) / 0.35, (10 + currentStage * 4) * scale, 5, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
-
-      // Stem/leaf primitives on early stages so growth is visible
-      if (currentStage <= 2) {
-        ctx.save();
-        const stemTop = by - 8 - currentStage * 5;
-        ctx.strokeStyle = "#3d8b3d";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(cx, by + baseYOffset - 1);
-        ctx.lineTo(cx, stemTop);
-        ctx.stroke();
-
-        if (currentStage >= 1) {
-          ctx.fillStyle = "#66bb66";
-          ctx.beginPath();
-          ctx.ellipse(cx - 4, stemTop + 4, 4, 2.6, -0.45, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.ellipse(cx + 4, stemTop + 6, 4.2, 2.8, 0.45, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        if (currentStage >= 2) {
-          ctx.fillStyle = "#7acb7a";
-          ctx.beginPath();
-          ctx.ellipse(cx - 6, stemTop - 1, 4.6, 3, -0.6, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.ellipse(cx + 6, stemTop + 1, 4.6, 3, 0.6, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.restore();
-      }
 
       ctx.save();
       ctx.translate(cx, by + baseYOffset);
       ctx.rotate(tiltAngle);
       ctx.scale(scale, scale);
+      
       if (img && img.complete && img.naturalWidth > 0) {
-        ctx.drawImage(img, -imageSize / 2, -imageSize, imageSize, imageSize);
+        if (currentStage === 0) {
+          // HARVEST MOON STYLE: Real Seed Planting (Cluster of 3x3)
+          ctx.globalAlpha = 0.85;
+          const sGap = 10; // Slightly wider for better visibility
+          const sSize = 9; // Slightly larger seeds
+          for (let row = -1; row <= 1; row++) {
+            for (let col = -1; col <= 1; col++) {
+               // Offset seeds for a more natural scattered feel
+               const jitterX = (Math.sin(now/100 + col*7) * 2);
+               const jitterY = (Math.cos(now/150 + row*5) * 2);
+               ctx.drawImage(img, (col * sGap) - sSize/2 + jitterX, (row * sGap) - sSize/2 + jitterY - 14, sSize, sSize);
+            }
+          }
+        } else {
+          ctx.drawImage(img, -imageSize / 2, -imageSize, imageSize, imageSize);
+        }
       } else {
-        const emojiSize = 14 + currentStage * 5;
+        const emojiSize = 20 + currentStage * 6;
         ctx.font = `${emojiSize}px Arial`;
         ctx.textAlign = "center";
         ctx.fillText(emoji, 0, -8);
@@ -500,13 +487,19 @@ function drawFishingBobber(ctx: CanvasRenderingContext2D, state: GameState) {
   ctx.lineTo(bx, by);
   ctx.stroke();
 
-  ctx.beginPath();
-  ctx.arc(bx, by, 7, 0, Math.PI * 2);
-  ctx.fillStyle = b.biting ? "#FF4444" : "#FF2200";
-  ctx.fill();
-  ctx.strokeStyle = "#FFF";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+  const img = imgs["/ikan.png"];
+  if (img && img.complete) {
+    const s = b.biting ? 20 : 16;
+    ctx.drawImage(img, bx - s / 2, by - s / 2, s, s);
+  } else {
+    ctx.beginPath();
+    ctx.arc(bx, by, 7, 0, Math.PI * 2);
+    ctx.fillStyle = b.biting ? "#FF4444" : "#FF2200";
+    ctx.fill();
+    ctx.strokeStyle = "#FFF";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
 
   const topY = by - 10;
   ctx.fillStyle = b.biting ? "#FF8800" : "#DDDDDD";
@@ -532,58 +525,61 @@ function drawFishingBobber(ctx: CanvasRenderingContext2D, state: GameState) {
 function drawNPCs(ctx: CanvasRenderingContext2D, state: GameState) {
   for (let i = 0; i < state.npcs.length; i++) {
     const npc = state.npcs[i];
+    const isMoving = Math.abs(npc.vx) > 0.1 || Math.abs(npc.vy) > 0.1;
+    const facing = npc.vx > 0 ? "right" : "left";
+    const walkCycle = (state.time / 160) % 4;
 
-    // NPC INDIVIDUAL ANIMATION PHASING (Offset to prevent robotic sync)
-    const timeScale = state.time + i * 1234;
-    const idleFeet =
-      (timeScale / 600) % 2 < 1
-        ? "/jalan_kaki_1_berdiri_awal.png"
-        : "/jalan_kaki_12_siap_berhenti.png";
+    let sprite: HTMLImageElement | undefined;
+    if (isMoving) {
+        const walkFrames = [
+          "/player_walk1.png",
+          "/jalan_kaki_10_tengah_langkah.png",
+          "/player_walk2.png",
+          "/jalan_kaki_11_akhir_langkah.png",
+        ];
+        sprite = imgs[walkFrames[Math.floor(walkCycle)]];
+    } else {
+        const idleFeet = (state.time / 600) % 2 < 1
+          ? "/jalan_kaki_1_berdiri_awal.png"
+          : "/jalan_kaki_12_siap_berhenti.png";
+        sprite = imgs[idleFeet];
+    }
 
-    // VARIETY IN NPC BEHAVIOR (Mixing default idle with mood frames)
-    const moods = [
-      idleFeet,
-      "/frame_004.png",
-      idleFeet,
-      "/frame_006.png",
-      idleFeet,
-      "/frame_007.png",
-    ];
-    const spriteIdx = Math.floor(timeScale / 2500) % moods.length;
-    const sprite = imgs[moods[spriteIdx]] || imgs[idleFeet];
+    if (!sprite || !sprite.complete) sprite = imgs["/jalan_kaki_1_berdiri_awal.png"];
 
     ctx.save();
     ctx.translate(npc.x, npc.y);
-    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 14);
-    shadow.addColorStop(0, "rgba(0,0,0,0.25)");
-    shadow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = shadow;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 14, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
 
-    // REMOVED BOBBING/SQUASHING FOR STABILITY
-    const flip = Math.sin(state.time / 2000 + i) > 0 ? 1 : -1;
-    ctx.scale(flip, 1);
+    // NPC Shadow
+    ctx.save();
+    ctx.scale(1.4, 0.35);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // NPC Sprite Animation (Matches player logic)
+    const flip = facing === "left" ? -1 : 1;
+    const breathing = !isMoving ? Math.sin(state.time / 600) * 0.8 : 0;
+    const squash = !isMoving ? 1 + Math.sin(state.time / 600) * 0.02 : 1;
+    
+    ctx.translate(0, -breathing);
+    ctx.scale(flip, squash);
 
     if (sprite && sprite.complete && sprite.naturalWidth > 0) {
-      // SCALED DOWN TO MATCH PLAYER SIZE (targetH = 38)
       const targetH = 38;
       const ratio = sprite.naturalWidth / sprite.naturalHeight;
-      const dw = targetH * ratio * 0.9;
+      const dw = targetH * ratio * 0.96;
       const dh = targetH;
-      ctx.drawImage(sprite, -dw / 2, -dh + 5, dw, dh);
-    } else {
-      ctx.fillStyle = npc.color;
-      ctx.beginPath();
-      ctx.arc(0, -32, 12, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.drawImage(sprite, -dw / 2, -dh + 4, dw, dh);
     }
 
-    ctx.scale(flip, 1); // unflip for text
+    // Name Tag
+    ctx.scale(flip, 1 / squash); // Unscale for text
     ctx.fillStyle = "rgba(0,0,0,0.65)";
     ctx.beginPath();
-    ctx.roundRect(-22, -80, 44, 14, 4);
+    roundRect(ctx, -22, -80, 44, 14, 4);
     ctx.fill();
     ctx.fillStyle = "#FFD700";
     ctx.font = "bold 8px sans-serif";

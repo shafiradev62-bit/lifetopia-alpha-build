@@ -165,6 +165,7 @@ export interface GameState {
     targetX: number | null;
     targetY: number | null;
     tutorialStep: number;
+    harvestCount: number; // Added to track 1st harvest unlock
     lifetopiaGold: number;
     walletAddress: string;
     jumpY: number; // For professional jump/flip mechanics
@@ -206,23 +207,25 @@ export interface GameState {
 
 export const FARM_BALANCE_PRESETS: Record<
   FarmBalancePreset,
-  { growTimes: CropTimingMap; goldRewards: CropTimingMap }
+  { growTimes: CropTimingMap; goldRewards: CropTimingMap; expMultiplier: number; playerSpeedBonus: number }
 > = {
   casual: {
     growTimes: {
-      wheat: 9000,
-      tomato: 13000,
-      carrot: 7000,
-      pumpkin: 19000,
-      corn: 10000,
+      wheat: 8000,
+      tomato: 12000,
+      carrot: 6000,
+      pumpkin: 18000,
+      corn: 9000,
     },
     goldRewards: {
-      wheat: 7,
-      tomato: 14,
-      carrot: 8,
-      pumpkin: 21,
-      corn: 12,
+      wheat: 8,
+      tomato: 16,
+      carrot: 10,
+      pumpkin: 25,
+      corn: 15,
     },
+    expMultiplier: 1.5,
+    playerSpeedBonus: 0.5,
   },
   normal: {
     growTimes: {
@@ -239,22 +242,26 @@ export const FARM_BALANCE_PRESETS: Record<
       pumpkin: 18,
       corn: 10,
     },
+    expMultiplier: 1.0,
+    playerSpeedBonus: 0,
   },
   hard: {
     growTimes: {
-      wheat: 16000,
-      tomato: 24000,
-      carrot: 13000,
-      pumpkin: 34000,
-      corn: 19000,
+      wheat: 18000,
+      tomato: 28000,
+      carrot: 15000,
+      pumpkin: 38000,
+      corn: 22000,
     },
     goldRewards: {
-      wheat: 5,
-      tomato: 10,
-      carrot: 6,
-      pumpkin: 15,
-      corn: 8,
+      wheat: 4,
+      tomato: 8,
+      carrot: 5,
+      pumpkin: 12,
+      corn: 7,
     },
+    expMultiplier: 0.7,
+    playerSpeedBonus: -0.3,
   },
 };
 
@@ -267,17 +274,19 @@ export const CROP_GOLD_REWARDS: CropTimingMap =
 export function applyFarmBalancePreset(
   preset: FarmBalancePreset,
   options?: { overwriteGlobals?: boolean },
-): { growTimes: CropTimingMap; goldRewards: CropTimingMap } {
+): { growTimes: CropTimingMap; goldRewards: CropTimingMap; expMultiplier: number; speedBonus: number } {
   const selected = FARM_BALANCE_PRESETS[preset];
   const growTimes = { ...selected.growTimes };
   const goldRewards = { ...selected.goldRewards };
+  const expMultiplier = selected.expMultiplier;
+  const speedBonus = selected.playerSpeedBonus;
 
   if (options?.overwriteGlobals !== false) {
     Object.assign(CROP_GROW_TIMES, growTimes);
     Object.assign(CROP_GOLD_REWARDS, goldRewards);
   }
 
-  return { growTimes, goldRewards };
+  return { growTimes, goldRewards, expMultiplier, speedBonus };
 }
 
 export function getFarmBalancePreset(

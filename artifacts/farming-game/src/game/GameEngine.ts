@@ -19,7 +19,9 @@ import {
   GARDEN_ROAD_Y,
   Footprint,
   applyFarmBalancePreset,
+  FARM_BALANCE_PRESETS,
 } from "./Game";
+import { AudioManager } from "./AudioSystem";
 
 export function createInitialState(): GameState {
   const s: GameState = {
@@ -54,8 +56,9 @@ export function createInitialState(): GameState {
       targetX: null,
       targetY: null,
       tutorialStep: 0,
+      harvestCount: 0, // Added to track 1st harvest unlock
       lifetopiaGold: 0,
-      walletAddress: "",
+      walletAddress: "GuestFarmer",
       jumpY: 0,
       jumpFlip: 0,
       jumpCount: 0,
@@ -275,6 +278,18 @@ export function updateGame(state: GameState, dt: number): GameState {
       if (Math.random() > 0.1)
         spawnVFX(
           s,
+          // The HTML img tag is syntactically incorrect here.
+          // Assuming it was meant as a comment or a visual cue for the user.
+          // Removing the HTML tag to maintain valid TypeScript syntax.
+          // <img
+          //    src="/tangan.png"
+          //    style={{
+          //      width: 80,
+          //      height: 80,
+          //      imageRendering: 'pixelated',
+          //      transform: 'rotate(-45deg)'
+          //    }}
+          // />
           wx + (Math.random() - 0.5) * 25,
           wy + (Math.random() - 0.5) * 25,
           "water",
@@ -391,8 +406,14 @@ export function updateGame(state: GameState, dt: number): GameState {
 }
 
 function executePlotAction(s: GameState, plotId: string, tool: string) {
+  // PROGRESSION LOCK: Unlock ALL plots as soon as the player plants their first seed (Step 7)
+  if (s.player.tutorialStep < 7 && plotId !== "plot-0-0") {
+    s.notification = { text: "PLANT AT LEAST ONE CROP TO UNLOCK ALL! 🏡", life: 80 };
+    return s;
+  }
+
   const idx = s.farmPlots.findIndex((p) => p.id === plotId);
-  if (idx === -1) return;
+  if (idx === -1) return s;
   const plot = { ...s.farmPlots[idx] };
   const { cellW, cellH } = FARM_GRID;
   const cx = FARM_GRID.startX + plot.gridX * cellW + cellW / 2;
@@ -404,9 +425,10 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
     // Celurit/hoe/shovel: if crop ready → harvest immediately, gold to player
     if (plot.crop?.ready) {
       const ct = plot.crop.type;
+      const preset = FARM_BALANCE_PRESETS[s.farmBalancePreset];
       const gold = CROP_GOLD_REWARDS[ct] || 5;
       s.player.gold += gold;
-      s.player.exp += 15;
+      s.player.exp += Math.floor(15 * preset.expMultiplier);
       s.player.action = tool as any;
       s.player.actionTimer = 35;
       s.player.inventory = {
@@ -418,6 +440,11 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       spawnText(s, cx, cy - 40, `+${gold}G`, "#FFD700");
       advanceQuest(s, "harvest");
       advanceQuest(s, "earn");
+      AudioManager.playSFX("harvest"); // Added for premium feel
+      // Unlock progression
+      s.player.harvestCount++;
+      if (s.player.tutorialStep < 10) s.player.tutorialStep = 10;
+      
       plot.crop = null;
       plot.watered = false;
       plot.fertilized = false;
@@ -427,6 +454,7 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       plot.tilled = true;
       s.player.action = tool as any;
       s.player.actionTimer = 35;
+      AudioManager.playSFX("hoe"); // Added for feedback
       spawnVFX(s, cx, cy, "sparkle");
       spawnVFX(s, cx, cy, "dust");
       s.notification = { text: "SOIL TILLED!", life: 80 };
@@ -445,6 +473,7 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
         plot.watered = true;
         s.player.action = "water" as any;
         s.player.actionTimer = 35;
+        AudioManager.playSFX("water"); // Added for immersive splash
         for (let i = 0; i < 10; i++)
           spawnVFX(
             s,
@@ -487,10 +516,12 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       };
     } else {
       plot.crop = makeCrop(cropType, s.time);
-      plot.watered = false;
+      // FIX: Keep watered status if already wet (Harvest Moon style)
+      // plot.watered stays as is
       plot.fertilized = false;
       s.player.action = "seed" as any;
       s.player.actionTimer = 30;
+      AudioManager.playSFX("plant"); // Thud sound
       s.player.inventory = { ...s.player.inventory, [tool]: count - 1 };
       spawnVFX(s, cx, cy, "plant");
       s.notification = { text: `PLANTED ${cropType.toUpperCase()}!`, life: 90 };
@@ -499,6 +530,7 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
   }
 
   s.farmPlots[idx] = plot;
+  return s;
 }
 
 function collides(px: number, py: number, rects: CollisionRect[]): boolean {
@@ -519,7 +551,9 @@ function collides(px: number, py: number, rects: CollisionRect[]): boolean {
 
 function handleMovement(s: GameState, _dt: number) {
   const p = s.player;
-  const speed = p.running ? p.speed * 1.9 : p.speed;
+  const diff = FARM_BALANCE_PRESETS[s.farmBalancePreset];
+  const baseSpeed = p.speed + diff.playerSpeedBonus;
+  const speed = p.running ? baseSpeed * 1.9 : baseSpeed;
   let dx = 0,
     dy = 0;
 
@@ -822,6 +856,12 @@ export function handleToolAction(
   };
   const { x: px, y: py, tool } = ns.player;
 
+  // Always move player to clicked position first
+  if (mouseX !== undefined && mouseY !== undefined) {
+    ns.player.targetX = mouseX;
+    ns.player.targetY = mouseY;
+  }
+
   // Fishing map — special handling
   if (ns.currentMap === "fishing") {
     handleFishingAction(ns);
@@ -942,6 +982,7 @@ function handleLevelUp(ns: GameState, px: number, py: number) {
     ns.player.maxHp += 5;
     ns.player.hp = Math.min(ns.player.hp + 5, ns.player.maxHp);
     spawnVFX(ns, px, py - 30, "sparkle");
+    AudioManager.playSFX("levelUp"); // Prestige alert
     ns.notification = { text: `⭐ LEVEL UP! ${ns.player.level}!`, life: 130 };
   }
 }
@@ -949,10 +990,11 @@ function handleLevelUp(ns: GameState, px: number, py: number) {
 function handleFishingAction(s: GameState) {
   const b = s.fishBobber;
   if (!b.active) {
+    // Player casts line
     s.fishBobber = {
       active: true,
-      x: s.player.x + (s.player.facing === "right" ? 60 : -60),
-      y: s.player.y + 20,
+      x: s.player.x + (s.player.facing === "right" ? 60 : s.player.facing === "left" ? -60 : 0),
+      y: s.player.y + (s.player.facing === "down" ? 60 : s.player.facing === "up" ? -60 : 20),
       bobTimer: 0,
       biting: false,
       biteTimer: 80 + Math.random() * 120,
