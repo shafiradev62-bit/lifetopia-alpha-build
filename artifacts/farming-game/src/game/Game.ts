@@ -50,6 +50,7 @@ export interface Crop {
   growTime: number;
   stage: 0 | 1 | 2 | 3 | 4;
   ready: boolean;
+  isRare?: boolean;
 }
 
 export interface FarmPlot {
@@ -207,7 +208,7 @@ export interface GameState {
 
 export const FARM_BALANCE_PRESETS: Record<
   FarmBalancePreset,
-  { growTimes: CropTimingMap; goldRewards: CropTimingMap; expMultiplier: number; playerSpeedBonus: number }
+  { growTimes: CropTimingMap; goldRewards: CropTimingMap; expMultiplier: number; playerSpeedBonus: number; rareChance: number }
 > = {
   casual: {
     growTimes: {
@@ -226,6 +227,7 @@ export const FARM_BALANCE_PRESETS: Record<
     },
     expMultiplier: 1.5,
     playerSpeedBonus: 0.5,
+    rareChance: 0.02,
   },
   normal: {
     growTimes: {
@@ -240,10 +242,11 @@ export const FARM_BALANCE_PRESETS: Record<
       tomato: 12,
       carrot: 7,
       pumpkin: 18,
-      corn: 10,
+      corn: 8,
     },
     expMultiplier: 1.0,
     playerSpeedBonus: 0,
+    rareChance: 0.10,
   },
   hard: {
     growTimes: {
@@ -258,10 +261,11 @@ export const FARM_BALANCE_PRESETS: Record<
       tomato: 8,
       carrot: 5,
       pumpkin: 12,
-      corn: 7,
+      corn: 8,
     },
     expMultiplier: 0.7,
     playerSpeedBonus: -0.3,
+    rareChance: 0.25,
   },
 };
 

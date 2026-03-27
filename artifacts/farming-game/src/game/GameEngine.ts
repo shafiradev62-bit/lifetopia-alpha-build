@@ -20,6 +20,7 @@ import {
   Footprint,
   applyFarmBalancePreset,
   FARM_BALANCE_PRESETS,
+  FarmBalancePreset,
 } from "./Game";
 import { AudioManager } from "./AudioSystem";
 
@@ -426,9 +427,11 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
     if (plot.crop?.ready) {
       const ct = plot.crop.type;
       const preset = FARM_BALANCE_PRESETS[s.farmBalancePreset];
-      const gold = CROP_GOLD_REWARDS[ct] || 5;
+    const baseGold = preset.goldRewards[plot.crop.type] || 5;
+    const gold = plot.crop.isRare ? baseGold * 3 : baseGold;
+    const exp = Math.floor(10 * preset.expMultiplier * (plot.crop.isRare ? 2 : 1));
       s.player.gold += gold;
-      s.player.exp += Math.floor(15 * preset.expMultiplier);
+      s.player.exp += exp;
       s.player.action = tool as any;
       s.player.actionTimer = 35;
       s.player.inventory = {
@@ -515,7 +518,7 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
         life: 80,
       };
     } else {
-      plot.crop = makeCrop(cropType, s.time);
+      plot.crop = makeCrop(cropType, s.time, s.farmBalancePreset);
       // FIX: Keep watered status if already wet (Harvest Moon style)
       // plot.watered stays as is
       plot.fertilized = false;
@@ -1037,14 +1040,20 @@ function handleFishingAction(s: GameState) {
 function makeCrop(
   type: "wheat" | "tomato" | "carrot" | "pumpkin",
   time: number,
+  farmBalancePreset: FarmBalancePreset,
 ): Crop {
+  const preset = FARM_BALANCE_PRESETS[farmBalancePreset];
+  const isRare = Math.random() < preset.rareChance;
+  const growTime = CROP_GROW_TIMES[type] || 20000;
+
   return {
     id: `c${time}-${Math.random()}`,
     type,
     plantedAt: time,
-    growTime: CROP_GROW_TIMES[type] || 20000,
+    growTime,
     stage: 0,
     ready: false,
+    isRare,
   };
 }
 

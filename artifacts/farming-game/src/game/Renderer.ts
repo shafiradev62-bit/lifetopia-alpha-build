@@ -12,6 +12,10 @@ import {
   CollisionRect,
   Tree,
   GARDEN_ROAD_Y,
+  Footprint,
+  applyFarmBalancePreset,
+  FARM_BALANCE_PRESETS,
+  FarmBalancePreset,
 } from "./Game";
 
 const imgs: Record<string, HTMLImageElement> = {};
@@ -333,10 +337,15 @@ function drawFarmPlots(ctx: CanvasRenderingContext2D, state: GameState) {
       ctx.fill();
       ctx.restore();
 
-      ctx.save();
       ctx.translate(cx, by + baseYOffset);
       ctx.rotate(tiltAngle);
       ctx.scale(scale, scale);
+
+      if (crop.isRare) {
+        ctx.filter = 'hue-rotate(60deg) saturate(2) brightness(1.2)';
+        ctx.shadowColor = '#FFD700';
+        ctx.shadowBlur = 15;
+      }
       
       if (img && img.complete && img.naturalWidth > 0) {
         if (currentStage === 0) {
@@ -361,6 +370,8 @@ function drawFarmPlots(ctx: CanvasRenderingContext2D, state: GameState) {
         ctx.textAlign = "center";
         ctx.fillText(emoji, 0, -8);
       }
+      ctx.filter = 'none';
+      ctx.shadowBlur = 0;
       ctx.restore();
     }
 
