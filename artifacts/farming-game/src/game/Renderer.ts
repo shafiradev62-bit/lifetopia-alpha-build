@@ -904,7 +904,8 @@ function drawPlayer(ctx: CanvasRenderingContext2D, state: GameState) {
 
       const selectedTool = state.player.tool;
       const heldToolImg = selectedTool ? getToolImg(selectedTool) : null;
-      if (heldToolImg && heldToolImg.complete) {
+      // Only show tool if on Home map
+      if (heldToolImg && heldToolImg.complete && state.currentMap === "home") {
         ctx.save();
         const toolBob = Math.sin(state.time / 300) * 1.0;
         // Hand: right side at waist/hip level — well below face

@@ -366,8 +366,8 @@ export function updateGame(state: GameState, dt: number): GameState {
       else if (tool === "axe") s.bubbleText = "Chop trees for gold!";
       else if (tool?.endsWith("-seed"))
         s.bubbleText = `Plant ${tool.split("-")[0]}!`;
-    } else if (!tool) {
-      // No tool — map/tutorial guidance
+    } else if (!tool || s.currentMap !== "home") {
+      // No tool OR not on farm — show only map/mode guidance
       if (s.currentMap === "city")
         s.bubbleText = "Visit the shop to buy seeds!";
       else if (s.currentMap === "fishing")
@@ -375,7 +375,10 @@ export function updateGame(state: GameState, dt: number): GameState {
       else if (s.currentMap === "garden") s.bubbleText = "Chat with friends!";
       else if (s.currentMap === "suburban")
         s.bubbleText = "Welcome to the suburbs!";
-      else s.bubbleText = "Select a tool to start farming!";
+      else if (s.currentMap === "home") 
+        s.bubbleText = "Select a tool to start farming!";
+      else
+        s.bubbleText = "";
     }
   }
 
