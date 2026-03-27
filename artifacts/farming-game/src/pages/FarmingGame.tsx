@@ -131,39 +131,57 @@ export default function FarmingGame() {
     setDs({ ...stateRef.current });
   }, []);
 
-  // Detect wallets on mount
+  // Detect wallets on mount (supports multiple injected providers)
   useEffect(() => {
-    const check = () => {
-      setPhantomFound(
-        !!(window as any).phantom?.solana?.isPhantom ||
-          !!(window as any).solana?.isPhantom,
-      );
+    const getEthereumProviders = (): any[] => {
       const eth = (window as any).ethereum;
-      setMetamaskFound(!!(eth?.isMetaMask && !eth?.isPhantom));
+      if (!eth) return [];
+      if (Array.isArray(eth.providers) && eth.providers.length > 0) {
+        return eth.providers;
+      }
+      return [eth];
     };
+
+    const check = () => {
+      const phantom = (window as any).phantom?.solana ?? (window as any).solana;
+      setPhantomFound(!!phantom?.isPhantom);
+
+      const providers = getEthereumProviders();
+      const hasMetaMask = providers.some((p) => !!p?.isMetaMask);
+      setMetamaskFound(hasMetaMask);
+    };
+
     check();
     const t = setTimeout(check, 1000);
-    return () => clearTimeout(t);
+    window.addEventListener("ethereum#initialized", check as EventListener, {
+      once: true,
+    });
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener(
+        "ethereum#initialized",
+        check as EventListener,
+      );
+    };
   }, []);
 
   const connectPhantom = async () => {
-    console.log("[Phantom] window.phantom:", (window as any).phantom);
-    console.log("[Phantom] window.solana:", (window as any).solana);
     try {
       const sol = (window as any).phantom?.solana ?? (window as any).solana;
-      console.log("[Phantom] sol object:", sol);
-      console.log("[Phantom] isPhantom:", sol?.isPhantom);
       if (!sol?.isPhantom) {
-        alert(
-          "Phantom tidak terdeteksi! Pastikan extension aktif dan halaman sudah di-refresh.",
-        );
-        window.open("https://phantom.app", "_blank");
+        stateRef.current.notification = {
+          text: "PHANTOM NOT FOUND. INSTALL EXTENSION.",
+          life: 140,
+        };
+        setDs({ ...stateRef.current });
+        window.open("https://phantom.app/download", "_blank");
         return;
       }
-      console.log("[Phantom] Calling connect...");
-      const res = await sol.connect({ onlyIfTrusted: false });
+
+      const res = await sol.connect();
       if (!res || !res.publicKey)
         throw new Error("Connection failed: No public key");
+
       const addr = res.publicKey.toString();
       setWalletAddress(addr);
       setWalletType("solana");
@@ -176,7 +194,6 @@ export default function FarmingGame() {
       loadProgress(addr);
       saveProgress();
     } catch (e: any) {
-      console.error("[Phantom] Error:", e);
       stateRef.current.notification = {
         text: (e?.message || "CONNECT FAILED").toUpperCase().slice(0, 40),
         life: 120,
@@ -189,11 +206,30 @@ export default function FarmingGame() {
     try {
       const eth = (window as any).ethereum;
       if (!eth) {
-        window.open("https://metamask.io", "_blank");
+        stateRef.current.notification = {
+          text: "METAMASK NOT FOUND. INSTALL EXTENSION.",
+          life: 140,
+        };
+        setDs({ ...stateRef.current });
+        window.open("https://metamask.io/download/", "_blank");
         return;
       }
-      const accounts = await eth.request({ method: "eth_requestAccounts" });
-      const addr = accounts[0];
+
+      const provider =
+        (Array.isArray(eth.providers)
+          ? eth.providers.find((p: any) => p?.isMetaMask)
+          : null) || eth;
+
+      if (!provider?.request) {
+        throw new Error("No Ethereum provider request interface");
+      }
+
+      const accounts = await provider.request({
+        method: "eth_requestAccounts",
+      });
+      const addr = accounts?.[0];
+      if (!addr) throw new Error("No account returned");
+
       setWalletAddress(addr);
       setWalletType("evm");
       setWalletConnected(true);
@@ -646,21 +682,24 @@ export default function FarmingGame() {
         .gf { font-family: 'Press Start 2P', 'Courier New', monospace; }
 
         .wood-panel {
-          background: linear-gradient(135deg, #CB9F68 0%, #A07844 100%);
-          border: 4px solid #5C4033;
-          border-radius: 12px;
-          box-shadow: inset 0 0 10px rgba(0,0,0,0.4), 4px 4px 0 rgba(0,0,0,0.5);
+          background: linear-gradient(180deg, rgba(16,22,34,0.96) 0%, rgba(10,14,24,0.96) 100%);
+          border: 1px solid rgba(123, 161, 255, 0.35);
+          border-radius: 16px;
+          box-shadow: 0 24px 60px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.05);
           position: relative;
+          backdrop-filter: blur(8px);
         }
 
         .gold-header {
-          background: linear-gradient(180deg, #D4AF37 0%, #B8860B 100%);
-          border: 2px solid #5C4033;
-          border-radius: 8px 8px 0 0;
-          padding: 8px 12px;
-          color: #FFF;
-          text-shadow: 1px 1.5px 0px rgba(0,0,0,0.8);
-          font-size: 14px;
+          background: transparent;
+          border: none;
+          border-bottom: 1px solid rgba(123, 161, 255, 0.25);
+          border-radius: 0;
+          padding: 10px 0 12px 0;
+          color: #EAF1FF;
+          text-shadow: none;
+          font-size: 12px;
+          letter-spacing: 0.6px;
         }
 
         .wb {
@@ -957,7 +996,7 @@ export default function FarmingGame() {
                     <>
                       <div
                         style={{
-                          color: "#4CAF50",
+                          color: "#38D39F",
                           fontSize: 9,
                           marginBottom: 10,
                         }}
@@ -966,12 +1005,13 @@ export default function FarmingGame() {
                       </div>
                       <div
                         style={{
-                          background: "rgba(0,0,0,0.3)",
-                          padding: "8px",
-                          borderRadius: 6,
-                          fontSize: 6,
+                          background: "rgba(255,255,255,0.04)",
+                          border: "1px solid rgba(123, 161, 255, 0.25)",
+                          padding: "10px",
+                          borderRadius: 10,
+                          fontSize: 7,
                           wordBreak: "break-all",
-                          color: "#FFE4B5",
+                          color: "#DCE9FF",
                           marginBottom: 10,
                         }}
                       >
@@ -979,7 +1019,7 @@ export default function FarmingGame() {
                       </div>
                       <div
                         style={{
-                          color: "#00BFFF",
+                          color: "#56CCFF",
                           fontSize: 10,
                           marginBottom: 12,
                         }}
@@ -1092,7 +1132,7 @@ export default function FarmingGame() {
                       <div
                         style={{
                           fontSize: 8,
-                          color: "#5C4033",
+                          color: "#B8CAEE",
                           marginBottom: 4,
                         }}
                       >
@@ -1105,8 +1145,12 @@ export default function FarmingGame() {
                           fontSize: 9,
                           padding: "16px",
                           background: phantomFound
-                            ? "linear-gradient(180deg, #ab9ff2, #512da8)"
-                            : "linear-gradient(180deg, #888, #555)",
+                            ? "linear-gradient(180deg, #9D7BFF, #5B31C7)"
+                            : "linear-gradient(180deg, #5A6272, #3A4150)",
+                          border: phantomFound
+                            ? "2px solid #B7A1FF"
+                            : "2px solid #6D7485",
+                          color: "#F5F7FF",
                         }}
                       >
                         {phantomFound ? "CONNECT PHANTOM" : "INSTALL PHANTOM"}
@@ -1118,8 +1162,12 @@ export default function FarmingGame() {
                           fontSize: 9,
                           padding: "16px",
                           background: metamaskFound
-                            ? "linear-gradient(180deg, #f6851b, #be630a)"
-                            : "linear-gradient(180deg, #888, #555)",
+                            ? "linear-gradient(180deg, #FFAA45, #D97812)"
+                            : "linear-gradient(180deg, #5A6272, #3A4150)",
+                          border: metamaskFound
+                            ? "2px solid #FFC47B"
+                            : "2px solid #6D7485",
+                          color: "#F5F7FF",
                         }}
                       >
                         {metamaskFound
