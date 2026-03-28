@@ -6,6 +6,7 @@
 class AudioController {
   private bgm: HTMLAudioElement | null = null;
   private currentBgmPath: string = "";
+  private mapLayer: HTMLAudioElement | null = null;
   private sfxCache: Record<string, HTMLAudioElement> = {};
   private initialized: boolean = false;
   private volume: number = 0.4;
@@ -19,6 +20,7 @@ class AudioController {
     plant: "https://assets.mixkit.co/sfx/preview/mixkit-small-item-drop-on-ground-2121.mp3",
     harvest: "https://assets.mixkit.co/sfx/preview/mixkit-magical-coin-win-1936.mp3",
     levelUp: "https://assets.mixkit.co/sfx/preview/mixkit-winning-an-extra-bonus-2098.mp3",
+    buy: "https://assets.mixkit.co/sfx/preview/mixkit-coins-handling-1939.mp3",
   };
 
   constructor() {
@@ -26,6 +28,31 @@ class AudioController {
     this.bgm.loop = true;
     this.bgm.volume = 0; // Start muted for fade-in
     this.bgm.crossOrigin = "anonymous";
+    this.mapLayer = new Audio();
+    this.mapLayer.loop = true;
+    this.mapLayer.crossOrigin = "anonymous";
+    this.mapLayer.volume = 0;
+  }
+
+  /** Extra quiet layer (e.g. bird ambience on Suburban) without replacing main BGM. */
+  public setMapAmbient(kind: "none" | "suburban_birds") {
+    if (!this.initialized) this.init();
+    if (!this.mapLayer) return;
+    if (kind === "none") {
+      this.mapLayer.pause();
+      this.mapLayer.src = "";
+      return;
+    }
+    const url =
+      "https://assets.mixkit.co/sfx/preview/mixkit-bird-chirp-at-morning-2468.mp3";
+    if (this.mapLayer.src !== url) {
+      this.mapLayer.src = url;
+      this.mapLayer.load();
+    }
+    this.mapLayer.volume = 0.14;
+    if (this.initialized) {
+      this.mapLayer.play().catch(() => {});
+    }
   }
 
   /**
@@ -46,13 +73,14 @@ class AudioController {
   }
 
   /**
-   * Plays BGM with professional cross-fade
+   * Plays BGM with professional cross-fade.
+   * Accepts .mp3 path; also tries .ogg as fallback for browser compatibility.
    */
   public playBGM(file: string) {
     if (!this.bgm) return;
     if (this.currentBgmPath === file) {
-        if (this.bgm.paused) this.bgm.play().catch(() => {});
-        return;
+      if (this.bgm.paused) this.bgm.play().catch(() => {});
+      return;
     }
 
     this.currentBgmPath = file;
@@ -63,16 +91,34 @@ class AudioController {
       this.bgm!.load();
       this.bgm!.volume = 0;
       this.bgm!.muted = false;
-      this.bgm!.play()
-        .then(() => {
-          console.log("[Audio] BGM Playback Started");
-          this.fadeIn();
-        })
-        .catch(e => {
-          console.error("[Audio] BGM Playback Blocked/Failed:", e);
-          // Retry later on any click if blocked
-          window.addEventListener('click', () => this.bgm!.play(), { once: true });
-        });
+
+      const tryPlay = () => {
+        this.bgm!.play()
+          .then(() => {
+            console.log("[Audio] BGM Playback Started:", file);
+            this.fadeIn();
+          })
+          .catch((e) => {
+            console.warn("[Audio] BGM autoplay blocked, waiting for interaction:", e);
+            const resume = () => {
+              this.bgm!.play().then(() => this.fadeIn()).catch(() => {});
+            };
+            window.addEventListener("click", resume, { once: true });
+            window.addEventListener("keydown", resume, { once: true });
+            window.addEventListener("touchstart", resume, { once: true });
+          });
+      };
+
+      // Small delay to let the browser load the audio
+      this.bgm!.addEventListener("canplaythrough", tryPlay, { once: true });
+      this.bgm!.addEventListener("error", (e) => {
+        console.error("[Audio] BGM load error:", e);
+      }, { once: true });
+
+      // Fallback: try playing after 300ms even without canplaythrough
+      setTimeout(() => {
+        if (this.bgm!.paused && this.bgm!.readyState >= 2) tryPlay();
+      }, 300);
     };
 
     if (this.bgm.paused) {

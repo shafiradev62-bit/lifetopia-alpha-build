@@ -5,7 +5,43 @@ export const BLOCKCHAIN_CONFIG = {
   ALCHEMY_API_KEY: import.meta.env?.VITE_ALCHEMY_API_KEY || "JiVbTwHnF3qEGfs5AtgKR",
   TOKEN_MINT: import.meta.env?.VITE_TOKEN_MINT_ADDRESS || "CG8dh8s8P8y7seC3hB9QWuoBX81ug8MvfZK9s9WjaQFT", // Lifetopia Gold
   SOLANA_RPC: `https://solana-mainnet.g.alchemy.com/v2/${import.meta.env?.VITE_ALCHEMY_API_KEY || "JiVbTwHnF3qEGfs5AtgKR"}`,
+  /** Devnet RPC for Alpha NFT check (gameplay utility) */
+  SOLANA_DEVNET_RPC:
+    import.meta.env?.VITE_SOLANA_DEVNET_RPC ||
+    "https://api.devnet.solana.com",
+  /** Optional: SPL mint or Metaplex NFT mint for Alpha collection */
+  ALPHA_NFT_MINT:
+    import.meta.env?.VITE_ALPHA_NFT_MINT || "",
 };
+
+/**
+ * Returns true if wallet holds at least one token/NFT from Alpha mint on devnet.
+ * If VITE_ALPHA_NFT_MINT is unset, falls back to false (no boost).
+ */
+export async function checkSolanaNFT(walletAddress: string): Promise<boolean> {
+  const mint = BLOCKCHAIN_CONFIG.ALPHA_NFT_MINT?.trim();
+  if (!walletAddress || !mint) return false;
+
+  try {
+    const body = {
+      jsonrpc: "2.0",
+      id: "alpha-nft-check",
+      method: "getTokenAccountsByOwner",
+      params: [walletAddress, { mint }, { encoding: "jsonParsed" }],
+    };
+    const res = await fetch(BLOCKCHAIN_CONFIG.SOLANA_DEVNET_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    const list = data?.result?.value;
+    return Array.isArray(list) && list.length > 0;
+  } catch {
+    return false;
+  }
+}
 
 export interface TokenBalanceResponse {
   jsonrpc: string;

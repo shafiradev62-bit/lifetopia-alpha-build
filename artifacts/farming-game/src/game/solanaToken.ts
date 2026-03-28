@@ -1,3 +1,4 @@
+// @ts-nocheck — remote ESM URLs resolved at build/runtime
 import { Connection, PublicKey, Transaction } from 'https://esm.sh/@solana/web3.js@1.87.6';
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from 'https://esm.sh/@solana/spl-token@0.3.9';
 

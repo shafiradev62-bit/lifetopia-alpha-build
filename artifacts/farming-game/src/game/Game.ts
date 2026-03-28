@@ -7,9 +7,9 @@ export const ASSET_PATHS = {
   home: "/home_1774349990715.jpg",
   kota: "/kota_1774349990717.png",
   mapCity: "/map_city_new.png",
-  mapFishing: "/map_fishing_new.png",
+  mapFishing: "/map_fishing_v2.png",
   mapGarden: "/map_garden_new.png",
-  mapSuburban: "/map_suburban_1774358176142.png",
+  mapSuburban: "/map_suburban_v2.png",
   teko: "/teko_siram.png",
 };
 
@@ -24,13 +24,16 @@ export type ToolType =
   | "hoe"
   | "sickle"
   | "play"
+  | "work"
+  | "fish"
   | "fertilizer"
   | "wheat-seed"
   | "tomato-seed"
   | "carrot-seed"
   | "pumpkin-seed";
 
-export type FarmBalancePreset = "casual" | "normal" | "hard";
+/** Game difficulty: affects grow duration & sell value multipliers */
+export type FarmBalancePreset = "easy" | "medium" | "hard";
 export type CropType = "wheat" | "tomato" | "carrot" | "pumpkin";
 export type CropTimingMap = Record<CropType | "corn", number>;
 
@@ -51,10 +54,16 @@ export interface Crop {
   stage: 0 | 1 | 2 | 3 | 4;
   ready: boolean;
   isRare?: boolean;
+  /** Failed / withered — can be cleared with axe */
+  dead?: boolean;
 }
+
+export type VFXType = "dust" | "plant" | "harvest" | "coin" | "sparkle" | "flash" | "slash" | "drop" | "water" | "leaf" | "bubble";
 
 export interface FarmPlot {
   id: string;
+  /** Stable UUID for Supabase `plot_id` / sync */
+  plotUuid: string;
   gridX: number;
   gridY: number;
   worldX: number;
@@ -63,6 +72,8 @@ export interface FarmPlot {
   watered: boolean;
   fertilized: boolean;
   crop: Crop | null;
+  /** Game time when drought stress began (crop exists, not watered) */
+  stressDrySince: number | null;
 }
 
 export interface VFXParticle {
@@ -75,7 +86,7 @@ export interface VFXParticle {
   maxLife: number;
   color: string;
   size: number;
-  type: "leaf" | "coin" | "sparkle" | "bubble" | "drop" | "dust";
+  type: VFXType;
 }
 
 export interface DamageNumber {
@@ -86,6 +97,7 @@ export interface DamageNumber {
   color: string;
   life: number;
   maxLife: number;
+  vy?: number;
 }
 
 export interface Quest {
@@ -96,7 +108,10 @@ export interface Quest {
   target: number;
   current: number;
   reward: number;
+  /** Objective reached — reward not yet claimed */
   completed: boolean;
+  /** Reward taken (prevents spam); paired with localStorage / gold sync */
+  claimed: boolean;
 }
 
 export interface NPC {
@@ -119,12 +134,29 @@ export interface FishBobber {
   biteTimer: number;
 }
 
+export interface FishingCatchHold {
+  until: number;
+  tier: 0 | 1 | 2;
+  gold: number;
+}
+
+export interface GardenCritter {
+  id: string;
+  kind: "butterfly" | "bird";
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  speed: number;
+}
+
 export interface ShopItem {
   id: string;
   name: string;
-  emoji: string;
   price: number;
-  type: "seed" | "tool" | "consumable";
+  type: "seed" | "tool" | "cosmetic";
+  emoji: string;
+  spriteUrl: string;
 }
 
 export interface CollisionRect {
@@ -132,6 +164,19 @@ export interface CollisionRect {
   y: number;
   w: number;
   h: number;
+}
+
+/** Locked house zones — suburban NFT teaser */
+export const SUBURBAN_HOUSE_ZONES: CollisionRect[] = [
+  { x: 200, y: 180, w: 140, h: 120 },
+  { x: 700, y: 160, w: 160, h: 130 },
+  { x: 480, y: 320, w: 120, h: 100 },
+];
+
+export interface GardenRemotePlayer {
+  id: string;
+  x: number;
+  y: number;
 }
 
 export interface Footprint {
@@ -172,6 +217,10 @@ export interface GameState {
     jumpY: number; // For professional jump/flip mechanics
     jumpFlip: number;
     jumpCount: number;
+    emote: "wave" | "dance" | "sit" | "laugh" | null;
+    emoteUntil: number;
+    emoteBubble: string | null;
+    emoteBubbleUntil: number;
   };
   currentMap: MapType;
   farmPlots: FarmPlot[];
@@ -192,6 +241,7 @@ export interface GameState {
   shopItems: ShopItem[];
   fishingActive: boolean;
   activePanel: string | null;
+  seedCooldowns: Record<string, number>;
   particleId: number;
   damageId: number;
   trees: Tree[];
@@ -204,112 +254,220 @@ export interface GameState {
   tutorialActive: boolean;
   showFarmDebugOverlay: boolean;
   farmBalancePreset: FarmBalancePreset;
+  shake: number;
+  /** Canvas pixels (match mouse on 1280×720 buffer) */
+  pointerCanvas: { x: number; y: number } | null;
+  /** Plot under cursor on farm (for hover outline) */
+  plotHoverFromPointer: string | null;
+  /** Squash/stretch juice on plot */
+  plotJuice: { plotId: string; until: number } | null;
+  farmingSpeedMultiplier: number;
+  nftBoostActive: boolean;
+  fishingCatchHold: FishingCatchHold | null;
+  fishingRareFlash: string | null;
+  gardenCritters: GardenCritter[];
+  gardenActivePlayers: number;
+  marketTrendCrop: CropType | null;
+  marketTrendUntil: number;
+  levelUpPopup: { message: string; until: number } | null;
+  pendingCloudSave: boolean;
+  /** Atomic plot interaction state machine */
+  farmingEngine:
+    | { kind: "idle" }
+    | {
+        kind: "busy";
+        plotId: string;
+        plotUuid: string;
+        toolKey: string;
+      };
+  gardenRemotePlayers: GardenRemotePlayer[];
+  fishingSession: {
+    state: "casting" | "waiting" | "bite" | "struggle" | "success" | "failed";
+    timer: number;
+    bobberX: number;
+    bobberY: number;
+    struggleProgress: number;
+    rarity?: "common" | "rare" | "exotic";
+  } | null;
 }
+
+
+/** GDD base grow times (ms) before difficulty multiplier */
+export const CROP_BASE_GROW_MS: Record<CropType, number> = {
+  wheat: 120000,
+  tomato: 240000,
+  carrot: 200000,
+  pumpkin: 480000,
+};
+
+/** Base sell gold before difficulty multiplier */
+export const CROP_BASE_SELL_GOLD: Record<CropType, number> = {
+  wheat: 10,
+  tomato: 22,
+  carrot: 18,
+  pumpkin: 55,
+};
+
+export const CROP_HARVEST_XP: Record<CropType, number> = {
+  wheat: 10,
+  tomato: 20,
+  carrot: 35,
+  pumpkin: 55,
+};
 
 export const FARM_BALANCE_PRESETS: Record<
   FarmBalancePreset,
-  { growTimes: CropTimingMap; goldRewards: CropTimingMap; expMultiplier: number; playerSpeedBonus: number; rareChance: number }
+  {
+    growTimeMultiplier: number;
+    goldRewardMultiplier: number;
+    expMultiplier: number;
+    playerSpeedBonus: number;
+    rareChance: number;
+    seedPriceExtra: Partial<Record<string, number>>;
+  }
 > = {
-  casual: {
-    growTimes: {
-      wheat: 8000,
-      tomato: 12000,
-      carrot: 6000,
-      pumpkin: 18000,
-      corn: 9000,
-    },
-    goldRewards: {
-      wheat: 8,
-      tomato: 16,
-      carrot: 10,
-      pumpkin: 25,
-      corn: 15,
-    },
-    expMultiplier: 1.5,
-    playerSpeedBonus: 0.5,
-    rareChance: 0.02,
-  },
-  normal: {
-    growTimes: {
-      wheat: 12000,
-      tomato: 18000,
-      carrot: 10000,
-      pumpkin: 26000,
-      corn: 14000,
-    },
-    goldRewards: {
-      wheat: 6,
-      tomato: 12,
-      carrot: 7,
-      pumpkin: 18,
-      corn: 8,
-    },
+  easy: {
+    growTimeMultiplier: 1.0,
+    goldRewardMultiplier: 1.0,
     expMultiplier: 1.0,
     playerSpeedBonus: 0,
-    rareChance: 0.10,
+    rareChance: 0.08,
+    seedPriceExtra: {},
+  },
+  medium: {
+    growTimeMultiplier: 1.5,
+    goldRewardMultiplier: 2.0,
+    expMultiplier: 1.15,
+    playerSpeedBonus: 0,
+    rareChance: 0.12,
+    seedPriceExtra: { "carrot-seed": 1.35, "pumpkin-seed": 1.55 },
   },
   hard: {
-    growTimes: {
-      wheat: 18000,
-      tomato: 28000,
-      carrot: 15000,
-      pumpkin: 38000,
-      corn: 22000,
-    },
-    goldRewards: {
-      wheat: 4,
-      tomato: 8,
-      carrot: 5,
-      pumpkin: 12,
-      corn: 8,
-    },
-    expMultiplier: 0.7,
-    playerSpeedBonus: -0.3,
-    rareChance: 0.25,
+    growTimeMultiplier: 2.0,
+    goldRewardMultiplier: 5.0,
+    expMultiplier: 1.35,
+    playerSpeedBonus: 0,
+    rareChance: 0.18,
+    seedPriceExtra: { "carrot-seed": 1.7, "pumpkin-seed": 2.1 },
   },
 };
 
-export const CROP_GROW_TIMES: CropTimingMap =
-  FARM_BALANCE_PRESETS.normal.growTimes;
+export const CROP_GROW_TIMES: CropTimingMap = {
+  wheat: CROP_BASE_GROW_MS.wheat,
+  tomato: CROP_BASE_GROW_MS.tomato,
+  carrot: CROP_BASE_GROW_MS.carrot,
+  pumpkin: CROP_BASE_GROW_MS.pumpkin,
+  corn: 140000,
+};
 
-export const CROP_GOLD_REWARDS: CropTimingMap =
-  FARM_BALANCE_PRESETS.normal.goldRewards;
+export const CROP_GOLD_REWARDS: CropTimingMap = {
+  wheat: CROP_BASE_SELL_GOLD.wheat,
+  tomato: CROP_BASE_SELL_GOLD.tomato,
+  carrot: CROP_BASE_SELL_GOLD.carrot,
+  pumpkin: CROP_BASE_SELL_GOLD.pumpkin,
+  corn: 12,
+};
 
 export function applyFarmBalancePreset(
   preset: FarmBalancePreset,
   options?: { overwriteGlobals?: boolean },
 ): { growTimes: CropTimingMap; goldRewards: CropTimingMap; expMultiplier: number; speedBonus: number } {
-  const selected = FARM_BALANCE_PRESETS[preset];
-  const growTimes = { ...selected.growTimes };
-  const goldRewards = { ...selected.goldRewards };
-  const expMultiplier = selected.expMultiplier;
-  const speedBonus = selected.playerSpeedBonus;
+  const sel = FARM_BALANCE_PRESETS[preset];
+  const growTimes: CropTimingMap = {
+    wheat: Math.round(CROP_BASE_GROW_MS.wheat * sel.growTimeMultiplier),
+    tomato: Math.round(CROP_BASE_GROW_MS.tomato * sel.growTimeMultiplier),
+    carrot: Math.round(CROP_BASE_GROW_MS.carrot * sel.growTimeMultiplier),
+    pumpkin: Math.round(CROP_BASE_GROW_MS.pumpkin * sel.growTimeMultiplier),
+    corn: Math.round(140000 * sel.growTimeMultiplier),
+  };
+  const goldRewards: CropTimingMap = {
+    wheat: Math.round(CROP_BASE_SELL_GOLD.wheat * sel.goldRewardMultiplier),
+    tomato: Math.round(CROP_BASE_SELL_GOLD.tomato * sel.goldRewardMultiplier),
+    carrot: Math.round(CROP_BASE_SELL_GOLD.carrot * sel.goldRewardMultiplier),
+    pumpkin: Math.round(CROP_BASE_SELL_GOLD.pumpkin * sel.goldRewardMultiplier),
+    corn: Math.round(12 * sel.goldRewardMultiplier),
+  };
 
   if (options?.overwriteGlobals !== false) {
     Object.assign(CROP_GROW_TIMES, growTimes);
     Object.assign(CROP_GOLD_REWARDS, goldRewards);
   }
 
-  return { growTimes, goldRewards, expMultiplier, speedBonus };
+  return {
+    growTimes,
+    goldRewards,
+    expMultiplier: sel.expMultiplier,
+    speedBonus: sel.playerSpeedBonus,
+  };
 }
 
 export function getFarmBalancePreset(
   growTimes: Partial<CropTimingMap>,
 ): FarmBalancePreset {
-  const entries = Object.entries(FARM_BALANCE_PRESETS) as Array<
-    [FarmBalancePreset, { growTimes: CropTimingMap }]
-  >;
-
-  for (const [name, preset] of entries) {
+  for (const name of ["easy", "medium", "hard"] as FarmBalancePreset[]) {
+    applyFarmBalancePreset(name, { overwriteGlobals: false });
+    const probe = FARM_BALANCE_PRESETS[name];
+    const g = {
+      wheat: Math.round(CROP_BASE_GROW_MS.wheat * probe.growTimeMultiplier),
+      tomato: Math.round(CROP_BASE_GROW_MS.tomato * probe.growTimeMultiplier),
+      carrot: Math.round(CROP_BASE_GROW_MS.carrot * probe.growTimeMultiplier),
+      pumpkin: Math.round(CROP_BASE_GROW_MS.pumpkin * probe.growTimeMultiplier),
+    };
     const same =
-      preset.growTimes.wheat === growTimes.wheat &&
-      preset.growTimes.tomato === growTimes.tomato &&
-      preset.growTimes.carrot === growTimes.carrot &&
-      preset.growTimes.pumpkin === growTimes.pumpkin;
+      g.wheat === growTimes.wheat &&
+      g.tomato === growTimes.tomato &&
+      g.carrot === growTimes.carrot &&
+      g.pumpkin === growTimes.pumpkin;
     if (same) return name;
   }
+  return "medium";
+}
 
-  return "normal";
+/**
+ * Crop gates (all difficulties): Wheat 1, Tomato 2+, Carrot 3+, Pumpkin 5+.
+ * `difficulty` retained for API compatibility; multipliers still from preset.
+ */
+export function seedUnlockLevel(
+  crop: CropType,
+  _difficulty: FarmBalancePreset,
+): number {
+  if (crop === "wheat") return 1;
+  if (crop === "tomato") return 1;
+  if (crop === "carrot") return 1;
+  if (crop === "pumpkin") return 1;
+  return 1;
+}
+
+/** Medium/Hard drought stress — ms without water before wither */
+export function stressWiltThresholdMs(preset: FarmBalancePreset): number {
+  if (preset === "easy") return 20000;
+  if (preset === "medium") return 7500;
+  return 5000;
+}
+
+export function isCropPlantingUnlocked(
+  crop: CropType,
+  playerLevel: number,
+  difficulty: FarmBalancePreset,
+): boolean {
+  return playerLevel >= seedUnlockLevel(crop, difficulty);
+}
+
+export function toolIdToCrop(tool: string): CropType | null {
+  if (tool.includes("wheat")) return "wheat";
+  if (tool.includes("tomato")) return "tomato";
+  if (tool.includes("carrot")) return "carrot";
+  if (tool.includes("pumpkin")) return "pumpkin";
+  return null;
+}
+
+export function getShopSeedPrice(
+  itemId: string,
+  basePrice: number,
+  difficulty: FarmBalancePreset,
+): number {
+  const extra = FARM_BALANCE_PRESETS[difficulty].seedPriceExtra[itemId] ?? 1;
+  return Math.ceil(basePrice * extra);
 }
 
 export const CROP_STAGES_COLORS: Record<string, string[]> = {
@@ -332,7 +490,7 @@ export const MAP_PLAYER_START: Record<MapType, { x: number; y: number }> = {
   city: { x: 520, y: 520 },
   fishing: { x: 280, y: 490 },
   garden: { x: 520, y: 460 },
-  suburban: { x: 520, y: 460 },
+  suburban: { x: 120, y: 480 },
 };
 
 export const GARDEN_ROAD_Y = { min: 420, max: 520 };
@@ -368,10 +526,8 @@ export const MAP_COLLISIONS: Record<MapType, CollisionRect[]> = {
     { x: 0, y: 0, w: 30, h: 585 },
     { x: 1010, y: 0, w: 30, h: 585 },
     { x: 0, y: 560, w: 1040, h: 25 },
-    // Water/fishing area - block northern part
-    { x: 100, y: 0, w: 840, h: 240 },
-    // Obstacles
-    { x: 90, y: 390, w: 300, h: 120 },
+    // Water/fishing area - block top edge only
+    { x: 0, y: 0, w: 1040, h: 140 },
   ],
   garden: [
     // Map boundaries
@@ -390,52 +546,21 @@ export const MAP_COLLISIONS: Record<MapType, CollisionRect[]> = {
     { x: 0, y: 0, w: 30, h: 585 },
     { x: 1010, y: 0, w: 30, h: 585 },
     { x: 0, y: 560, w: 1040, h: 25 },
+    // Only walk on the road/path — block residential top and yard bottom
+    { x: 0, y: 0, w: 1040, h: 420 }, // Block top residential zone
+    { x: 0, y: 520, w: 1040, h: 70 }, // Block bottom yard zone
   ],
 };
 
 export const SHOP_ITEMS: ShopItem[] = [
-  {
-    id: "wheat-seed",
-    name: "Wheat Seeds",
-    emoji: "🌾",
-    price: 5,
-    type: "seed",
-  },
-  {
-    id: "tomato-seed",
-    name: "Tomato Seeds",
-    emoji: "🍅",
-    price: 8,
-    type: "seed",
-  },
-  {
-    id: "carrot-seed",
-    name: "Carrot Seeds",
-    emoji: "🥕",
-    price: 6,
-    type: "seed",
-  },
-  {
-    id: "pumpkin-seed",
-    name: "Pumpkin Seeds",
-    emoji: "🎃",
-    price: 10,
-    type: "seed",
-  },
-  {
-    id: "fish-bait",
-    name: "Fish Bait",
-    emoji: "🪱",
-    price: 3,
-    type: "consumable",
-  },
-  {
-    id: "fertilizer",
-    name: "Fertilizer",
-    emoji: "💊",
-    price: 12,
-    type: "consumable",
-  },
+  { id: "wheat-seed", name: "Wheat Seed", price: 2, type: "seed", emoji: "🌾", spriteUrl: "/wheat.png" },
+  { id: "tomato-seed", name: "Tomato Seed", price: 5, type: "seed", emoji: "🍅", spriteUrl: "/tomato.png" },
+  { id: "carrot-seed", name: "Carrot Seed", price: 8, type: "seed", emoji: "🥕", spriteUrl: "/carrot.png" },
+  { id: "pumpkin-seed", name: "Pumpkin Seed", price: 12, type: "seed", emoji: "🎃", spriteUrl: "/pumpkin.png" },
+  { id: "water", name: "Watering Can", price: 15, type: "tool", emoji: "💧", spriteUrl: "/teko_siram.png" },
+  { id: "fertilizer", name: "Super Growth", price: 10, type: "tool", emoji: "✨", spriteUrl: "/karung_1774349990717.png" },
+  { id: "axe", name: "Wood Axe", price: 25, type: "tool", emoji: "🪓", spriteUrl: "/kapak_1774349990716.png" },
+  { id: "hoe", name: "Steel Hoe", price: 30, type: "tool", emoji: "⛏️", spriteUrl: "/celurit_1774349990712.png" },
 ];
 
 export const FARM_GRID = {
@@ -446,3 +571,30 @@ export const FARM_GRID = {
   startX: 197,
   startY: 259,
 };
+
+export function farmPlotIsActionable(
+  plot: FarmPlot,
+  tool: string | null,
+): boolean {
+  if (!tool) return false;
+  if (tool === "axe" || tool === "axe-large") {
+    return (
+      plot.tilled &&
+      !!plot.crop &&
+      (!plot.crop.ready || !!plot.crop.dead)
+    );
+  }
+  const isSoil =
+    tool === "hoe" || tool === "shovel" || tool === "sickle";
+  if (isSoil) {
+    if (plot.crop?.ready) return true;
+    if (!plot.tilled) return true;
+    if (!plot.crop) return true;
+    return false;
+  }
+  if (tool === "water")
+    return plot.tilled && !!plot.crop && !plot.watered;
+  if (tool === "fertilizer") return plot.tilled && !plot.fertilized;
+  if (tool.endsWith("-seed")) return plot.tilled && !plot.crop;
+  return false;
+}
