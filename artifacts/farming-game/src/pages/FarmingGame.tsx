@@ -707,7 +707,7 @@ export default function FarmingGame() {
     };
     animRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animRef.current);
-  }, [loaded]);
+  }, [loaded, walletConnected, splashDone, introTutorialDone]);
 
   // ── Tool selection ────────────────────────────────────────────────────────
   const selectTool = (toolId: string) => {
