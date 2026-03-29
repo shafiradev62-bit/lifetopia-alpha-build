@@ -83,8 +83,8 @@ function attachFarmingEngine(
 function isFarmMovementLocked(player: GameState["player"]): boolean {
   if (player.actionTimer <= 0 || !player.action) return false;
   const a = player.action as string;
-  if (a === "hoe" || a === "sickle" || a === "water" || a === "fertilizer")
-    return true;
+  const lockedActions = ["hoe", "sickle", "water", "fertilizer", "axe", "axe-large", "shovel", "sickle-gold"];
+  if (lockedActions.includes(a)) return true;
   if (a.includes("seed")) return true;
   return false;
 }
@@ -672,39 +672,45 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
   const cx = FARM_GRID.startX + plot.gridX * cellW + cellW / 2;
   const cy = FARM_GRID.startY + plot.gridY * cellH + cellH / 2;
 
+  // AXE: Clear crops (dead or alive) OR untill/reset the soil
   if (tool === "axe" || tool === "axe-large") {
-    plot.crop = null;
-    plot.watered = false;
-    plot.fertilized = false;
-    plot.stressDrySince = null;
+    if (plot.crop) {
+      // Clear crop
+      plot.crop = null;
+      plot.watered = false;
+      plot.fertilized = false;
+      plot.stressDrySince = null;
+      s.notification = { text: "CROP CLEARED!", life: 85 };
+    } else if (plot.tilled) {
+      // Untill soil
+      plot.tilled = false;
+      plot.watered = false;
+      plot.fertilized = false;
+      s.notification = { text: "SOIL RESET!", life: 85 };
+    }
+    
     s.player.action = tool as any;
     s.player.actionTimer = 25;
     attachFarmingEngine(s, plot, tool);
     spawnVFX(s, cx, cy, "dust");
-    AudioManager.playSFX("hoe");
-    s.notification = { text: "CLEARED WITH AXE!", life: 85 };
+    AudioManager.playSFX("hoe"); // Using hoe sound for impact
     s.farmPlots[idx] = plot;
     return s;
   }
 
+  // SOIL TOOLS (Hoe, Sickle, Shovel): Till the earth OR harvest ready crops
   const isSoilTool = tool === "hoe" || tool === "shovel" || tool === "sickle";
-
   if (isSoilTool) {
     if (plot.crop?.ready) {
       const ct = plot.crop.type;
       const preset = FARM_BALANCE_PRESETS[s.farmBalancePreset];
-      const baseGold =
-        CROP_GOLD_REWARDS[plot.crop.type] ||
-        preset.goldRewardMultiplier * 5;
+      const baseGold = CROP_GOLD_REWARDS[ct] || preset.goldRewardMultiplier * 5;
       let gold = plot.crop.isRare ? baseGold * 3 : baseGold;
-      if (s.marketTrendCrop === ct)
-        gold = Math.floor(gold * 1.2);
+      if (s.marketTrendCrop === ct) gold = Math.floor(gold * 1.2);
+      
       const baseXp = CROP_HARVEST_XP[ct] || 10;
-      const exp = Math.floor(
-        baseXp *
-          preset.expMultiplier *
-          (plot.crop.isRare ? 2 : 1),
-      );
+      const exp = Math.floor(baseXp * preset.expMultiplier * (plot.crop.isRare ? 2 : 1));
+      
       s.player.gold += gold;
       s.player.exp += exp;
       s.player.action = tool as any;
@@ -717,7 +723,6 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       };
       s.player.inventory = nextInventory;
 
-      // Atomic Off-Chain Gold & Inventory Sync (GDD Section 4)
       const wallet = s.player.walletAddress;
       if (wallet) {
         import("./questManager").then(qm => {
@@ -730,7 +735,6 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       spawnVFX(s, cx, cy - 20, "coin");
       spawnText(s, cx, cy - 56, `+${gold} GOLD`, "#FFD700", -2.4);
       
-      // Quest progress
       bumpQuestProgress(s, "harvest");
       addEarnQuestProgress(s, gold);
       if (wallet) {
@@ -757,18 +761,17 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       s.player.actionTimer = 35;
       attachFarmingEngine(s, plot, tool);
       s.shake = 8;
-      AudioManager.playSFX("hoe"); // Added for feedback
+      AudioManager.playSFX("hoe");
       spawnVFX(s, cx, cy, "sparkle");
       spawnVFX(s, cx, cy, "flash");
       spawnVFX(s, cx, cy, "dust");
       s.notification = { text: "SOIL TILLED!", life: 80 };
     } else if (plot.crop) {
       if (plot.crop.dead) {
-        s.notification = { text: "WITHERED! SELECT AXE THEN TAP PLOT TO CLEAR", life: 100 };
+        s.notification = { text: "WITHERED! USE AXE TO CLEAR", life: 100 };
       } else if (!plot.watered) {
-        s.notification = { text: `${plot.crop.type.toUpperCase()} NEEDS WATER! SELECT WATER TOOL`, life: 100 };
+        s.notification = { text: `${plot.crop.type.toUpperCase()} NEEDS WATER!`, life: 100 };
       } else {
-        // Show time remaining
         const gtBase = CROP_GROW_TIMES[plot.crop.type] || plot.crop.growTime || 20000;
         const mult = s.farmingSpeedMultiplier || 1;
         const gt = (plot.fertilized ? Math.max(3000, gtBase / 2) : gtBase) * mult;
@@ -777,91 +780,75 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
         const remSec = Math.ceil(remaining / 1000);
         const remStr = remSec >= 60 ? `${Math.floor(remSec/60)}m ${remSec%60}s` : `${remSec}s`;
         const pct = Math.round(Math.min(100, (elapsed / gt) * 100));
-        s.notification = { text: `${plot.crop.type.toUpperCase()} GROWING... ${pct}% — READY IN ${remStr}`, life: 120 };
+        s.notification = { text: `${plot.crop.type.toUpperCase()}: ${pct}% — READY IN ${remStr}`, life: 120 };
       }
     } else {
-      s.notification = { text: "SOIL READY! SELECT A SEED AND TAP TO PLANT", life: 90 };
+      s.notification = { text: "READY FOR SEEDS!", life: 90 };
     }
-  } else if (tool === "water") {
+  } 
+  
+  // WATERING CAN: Works on any tilled plot
+  else if (tool === "water") {
     if (!plot.tilled) {
-      s.notification = { text: "TILL SOIL FIRST! SELECT HOE (SLOT 1)", life: 80 };
-    } else if (!plot.crop) {
-      s.notification = { text: "PLANT A SEED FIRST! SELECT A SEED TOOL", life: 80 };
+      s.notification = { text: "TILL SOIL FIRST!", life: 80 };
+    } else if (plot.watered) {
+      s.notification = { text: "ALREADY WATERED!", life: 70 };
     } else {
-      if (plot.watered) {
-        s.notification = { text: "ALREADY WATERED! WAIT FOR CROP TO GROW", life: 70 };
-      } else {
-        plot.watered = true;
-        plot.stressDrySince = null;
-        s.player.action = "water" as any;
-        s.player.actionTimer = 35;
-        attachFarmingEngine(s, plot, "water");
-        AudioManager.playSFX("water"); // Added for immersive splash
-        for (let i = 0; i < 15; i++)
-          spawnVFX(
-            s,
-            cx + (Math.random() - 0.5) * 45,
-            cy + (Math.random() - 0.5) * 35,
-            "water",
-          );
-        s.notification = { text: "WATERED!", life: 80 };
-      }
+      plot.watered = true;
+      plot.stressDrySince = null;
+      s.player.action = "water" as any;
+      s.player.actionTimer = 35;
+      attachFarmingEngine(s, plot, "water");
+      AudioManager.playSFX("water");
+      for (let i = 0; i < 15; i++)
+        spawnVFX(s, cx + (Math.random() - 0.5) * 45, cy + (Math.random() - 0.5) * 35, "water");
+      s.notification = { text: "WATERED!", life: 80 };
     }
-  } else if (tool === "fertilizer") {
+  } 
+  
+  // FERTILIZER: Works on any tilled plot
+  else if (tool === "fertilizer") {
     if (!plot.tilled) {
       s.notification = { text: "TILL SOIL FIRST!", life: 70 };
+    } else if (plot.fertilized) {
+      s.notification = { text: "ALREADY FERTILIZED!", life: 60 };
     } else {
-      if (plot.fertilized) {
-        s.notification = { text: "ALREADY FERTILIZED!", life: 60 };
-      } else {
-        plot.fertilized = true;
-        s.player.action = "fertilizer" as any;
-        s.player.actionTimer = 30;
-        attachFarmingEngine(s, plot, "fertilizer");
-        spawnVFX(s, cx, cy, "sparkle");
-        s.notification = { text: "GROWTH BOOSTED!", life: 80 };
-      }
+      plot.fertilized = true;
+      s.player.action = "fertilizer" as any;
+      s.player.actionTimer = 30;
+      attachFarmingEngine(s, plot, "fertilizer");
+      spawnVFX(s, cx, cy, "sparkle");
+      s.notification = { text: "GROWTH BOOSTED!", life: 80 };
     }
-  } else if (tool.endsWith("-seed")) {
-    let cropType: "wheat" | "tomato" | "carrot" | "pumpkin" = "wheat";
+  } 
+  
+  // SEEDS: Plant on empty tilled soil
+  else if (tool.endsWith("-seed")) {
+    let cropType: CropType = "wheat";
     if (tool.includes("tomato")) cropType = "tomato";
     else if (tool.includes("carrot")) cropType = "carrot";
     else if (tool.includes("pumpkin")) cropType = "pumpkin";
     
-    // Check seed cooldown
     const cd = s.seedCooldowns[tool] || 0;
     if (cd > 0) {
       const wait = Math.ceil(cd / 1000);
-      s.notification = { text: `REFILLING ${cropType.toUpperCase()} SEEDS... ${wait}s`, life: 75 };
+      s.notification = { text: `REFILLING SEEDS... ${wait}s`, life: 75 };
       return s;
     }
 
     const count = s.player.inventory[tool] || 0;
 
     if (!plot.tilled) {
-      s.notification = { text: "TILL SOIL FIRST! SELECT HOE (SLOT 1) AND TAP PLOT", life: 90 };
+      s.notification = { text: "TILL SOIL FIRST!", life: 90 };
     } else if (plot.crop) {
-      if (plot.crop.dead) {
-        s.notification = { text: "CLEAR DEAD CROP FIRST! SELECT AXE (SLOT 2)", life: 90 };
-      } else if (plot.crop.ready) {
-        s.notification = { text: "HARVEST FIRST! SELECT HOE (SLOT 1) TO HARVEST", life: 90 };
-      } else {
-        s.notification = { text: "PLOT ALREADY HAS A GROWING CROP! WAIT FOR IT", life: 90 };
-      }
+      if (plot.crop.dead) s.notification = { text: "CLEAR DEAD CROP FIRST!", life: 90 };
+      else if (plot.crop.ready) s.notification = { text: "HARVEST FIRST!", life: 90 };
+      else s.notification = { text: "PLOT OCCUPIED!", life: 90 };
     } else if (count <= 0) {
-      s.notification = { text: `NO ${cropType.toUpperCase()} SEEDS! BUY MORE IN CITY SHOP`, life: 90 };
-    } else if (
-      !isCropPlantingUnlocked(
-        cropType,
-        s.player.level,
-        s.farmBalancePreset,
-      )
-    ) {
+      s.notification = { text: `NO ${cropType.toUpperCase()} SEEDS!`, life: 90 };
+    } else if (!isCropPlantingUnlocked(cropType, s.player.level, s.farmBalancePreset)) {
       const need = seedUnlockLevel(cropType, s.farmBalancePreset);
-      s.notification = {
-        text: `LOCKED — LEVEL ${need}+`,
-        life: 90,
-      };
+      s.notification = { text: `LOCKED — LEVEL ${need}+`, life: 90 };
     } else {
       plot.crop = makeCrop(cropType, getServerTime(), s.farmBalancePreset);
       plot.fertilized = false;
@@ -869,15 +856,14 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       s.player.action = "seed" as any;
       s.player.actionTimer = 30;
       attachFarmingEngine(s, plot, tool);
-      AudioManager.playSFX("plant"); // Thud sound
+      AudioManager.playSFX("plant");
       s.player.inventory = { ...s.player.inventory, [tool]: count - 1 };
       
-      // Set cooldown for this seed type
-      const cdMap: Record<string, number> = { "wheat-seed": 5000, "tomato-seed": 35000, "carrot-seed": 45000, "pumpkin-seed": 65000 };
+      const cdMap: Record<string, number> = { "wheat-seed": 5000, "tomato-seed": 25000, "carrot-seed": 35000, "pumpkin-seed": 55000 };
       s.seedCooldowns[tool] = cdMap[tool] || 10000;
 
       spawnVFX(s, cx, cy, "plant");
-      spawnVFX(s, cx, cy, "flash"); // Additive flash for feedback
+      spawnVFX(s, cx, cy, "flash");
       s.notification = { text: `PLANTED ${cropType.toUpperCase()}!`, life: 90 };
       bumpQuestProgress(s, "plant");
       s.plotJuice = { plotId: plot.id, until: s.time + 360 };
@@ -920,6 +906,18 @@ function handleMovement(s: GameState, _dt: number) {
 
   // Point-and-click Travel Logic
   if (p.targetX !== null && p.targetY !== null) {
+    // Early escape: if we're close enough to act on a pending plot, do it now!
+    if (s.pendingPlotAction && s.currentMap === "home") {
+      const dPlot = distanceToPlot(s, s.pendingPlotAction.plotId);
+      if (dPlot <= FARM_ACTION_RADIUS_PX) {
+        executePlotAction(s, s.pendingPlotAction.plotId, s.pendingPlotAction.tool);
+        s.pendingPlotAction = null;
+        p.targetX = null;
+        p.targetY = null;
+        return;
+      }
+    }
+
     const dist = Math.hypot(p.targetX - p.x, p.targetY - p.y);
     if (dist > 8) {
       dx = ((p.targetX - p.x) / dist) * speed;
@@ -935,19 +933,9 @@ function handleMovement(s: GameState, _dt: number) {
     } else {
       p.targetX = null;
       p.targetY = null;
-      // Fire pending plot action when player arrives
+      // Arrived at destination — handle any remaining pending actions
       if (s.pendingPlotAction && s.currentMap === "home") {
-        const pid = s.pendingPlotAction.plotId;
-        if (distanceToPlot(s, pid) <= FARM_ACTION_RADIUS_PX) {
-          executePlotAction(
-            s,
-            pid,
-            s.pendingPlotAction.tool,
-          );
-        } else {
-          s.bubbleText = "Too far!";
-          s.notification = { text: "TOO FAR!", life: 70 };
-        }
+        executePlotAction(s, s.pendingPlotAction.plotId, s.pendingPlotAction.tool);
         s.pendingPlotAction = null;
       }
     }

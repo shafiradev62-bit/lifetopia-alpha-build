@@ -578,24 +578,34 @@ export function farmPlotIsActionable(
   tool: string | null,
 ): boolean {
   if (!tool) return false;
+
+  // Axe: Clear crops (dead or alive) OR untill/reset the soil
   if (tool === "axe" || tool === "axe-large") {
-    return (
-      plot.tilled &&
-      !!plot.crop &&
-      (!plot.crop.ready || !!plot.crop.dead)
-    );
+    return plot.tilled || !!plot.crop;
   }
-  const isSoil =
-    tool === "hoe" || tool === "shovel" || tool === "sickle";
+
+  // Soil tools (Hoe, Sickle, Shovel): Till the earth OR harvest ready crops
+  const isSoil = tool === "hoe" || tool === "shovel" || tool === "sickle" || tool === "sickle-gold";
   if (isSoil) {
-    if (plot.crop?.ready) return true;
-    if (!plot.tilled) return true;
-    if (!plot.crop) return true;
+    if (!plot.tilled) return true; // Can till
+    if (plot.crop?.ready) return true; // Can harvest
     return false;
   }
-  if (tool === "water")
-    return plot.tilled && !!plot.crop && !plot.watered;
-  if (tool === "fertilizer") return plot.tilled && !plot.fertilized;
-  if (tool.endsWith("-seed")) return plot.tilled && !plot.crop;
+
+  // Water: Any tilled plot, with or without crop, as long as it's dry
+  if (tool === "water") {
+    return plot.tilled && !plot.watered;
+  }
+
+  // Fertilizer: Any tilled plot that hasn't been boosted yet
+  if (tool === "fertilizer") {
+    return plot.tilled && !plot.fertilized;
+  }
+
+  // Seeds: Only on tilled, empty soil
+  if (tool.endsWith("-seed")) {
+    return plot.tilled && !plot.crop;
+  }
+
   return false;
 }
