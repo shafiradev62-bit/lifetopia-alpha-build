@@ -366,34 +366,41 @@ export default function FarmingGame() {
   };
 
   const _onWalletConnected = async (addr: string, type: "solana" | "evm", provider: any) => {
+    // 1. Immediate UI update for connectivity
     setWalletAddress(addr);
     setWalletType(type);
     setWalletConnected(true);
     localStorage.setItem("wallet_addr", addr);
     localStorage.setItem("wallet_type", type);
     stateRef.current.player.walletAddress = addr;
+    
+    // 2. Parallelize backend & on-chain verification for maximum speed
+    const [loadRes, nftRes, proof] = await Promise.all([
+      loadProgress(addr), // Load Supabase stats
+      type === "solana" ? checkSolanaNFT(addr) : Promise.resolve(false), // Check tokens
+      type === "solana" ? signSolanaLogin(provider, addr) : signEvmLogin(provider, addr), // SIWS
+    ]);
+
+    // 3. Post-sync UI & Logic updates
     setInitialLoadComplete(false);
-    await loadProgress(addr);
-    try {
-      const proof = type === "solana"
-        ? await signSolanaLogin(provider, addr)
-        : await signEvmLogin(provider, addr);
-      await verifyWalletWithSupabase(proof);
-    } catch { /* non-fatal */ }
+    
+    if (proof) {
+      verifyWalletWithSupabase(proof).catch(console.error);
+    }
+
     const notifText = type === "solana" ? "PHANTOM CONNECTED!" : "METAMASK CONNECTED!";
     stateRef.current.notification = { text: notifText, life: 120 };
     triggerPopup(notifText);
-    if (type === "solana") {
-      const hasAlpha = await checkSolanaNFT(addr);
-      const boost = applyNFTBoostsToState(hasAlpha);
+
+    if (type === "solana" && nftRes) {
+      const boost = applyNFTBoostsToState(true);
       stateRef.current.farmingSpeedMultiplier = boost.farmingSpeedMultiplier;
       stateRef.current.nftBoostActive = boost.nftBoostActive;
-      if (hasAlpha) {
-        const boostText = "ALPHA NFT — FARM SPEED BOOST!";
-        stateRef.current.notification = { text: boostText, life: 140 };
-        triggerPopup(boostText);
-      }
+      const boostText = "ALPHA NFT — FARM SPEED BOOST!";
+      stateRef.current.notification = { text: boostText, life: 3000 };
+      triggerPopup(boostText);
     }
+
     setDs({ ...stateRef.current });
     await saveProgress();
   };
@@ -674,7 +681,12 @@ export default function FarmingGame() {
       }
 
       const prevNotif = stateRef.current.notification?.text;
-      stateRef.current = updateGame(stateRef.current, dt);
+      
+      const isFrozen = !walletConnected && !stateRef.current.demoMode && splashDone && introTutorialDone;
+      if (!isFrozen) {
+        stateRef.current = updateGame(stateRef.current, dt);
+      }
+      
       const newNotif = stateRef.current.notification?.text;
       if (newNotif && newNotif !== prevNotif) triggerPopup(newNotif);
 
@@ -859,22 +871,18 @@ export default function FarmingGame() {
   const mapHint = splashDone && introTutorialDone && ds.currentMap !== "home"
     ? MAP_REASON[ds.currentMap] ?? null : null;
 
-  const containerStyle: React.CSSProperties = isMobile ? {
+  const containerStyle: React.CSSProperties = {
     position: "relative",
-    width: "100dvw",
-    height: "100dvh",
+    width: isMobile ? "100dvw" : "min(100dvw, 177.78dvh)",
+    height: isMobile ? "100dvh" : "min(100dvh, 56.25dvw)",
     overflow: "hidden",
     background: "#000",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-  } : {
-    position: "relative",
-    width: 1280,
-    height: 720,
-    overflow: "hidden",
-    background: "#000",
     margin: "0 auto",
+    top: isMobile ? 0 : "50%",
+    transform: isMobile ? "none" : "translateY(-50%)",
   };
 
   // ── RENDER ────────────────────────────────────────────────────────────────
@@ -1096,7 +1104,7 @@ export default function FarmingGame() {
 
       {/* ── DESKTOP TOOL TRAY + BOOST BUTTON ── */}
       {!isMobile && splashDone && introTutorialDone && (
-        <div style={{ position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+        <div style={{ position: "absolute", bottom: 100, left: "50%", transform: "translateX(-50%)", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, pointerEvents: ds.demoMode ? "none" : "auto" }}>
           {ds.currentMap === "home" && (
             <>
               <div className="tray">
