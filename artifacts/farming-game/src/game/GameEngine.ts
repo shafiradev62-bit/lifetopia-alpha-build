@@ -867,27 +867,36 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
 
     if (!plot.tilled) {
       s.notification = { text: "TILL SOIL FIRST!", life: 90 };
+      s.farmPlots[idx] = plot;
+      return s;
     } else if (plot.crop) {
       if (plot.crop.dead) s.notification = { text: "CLEAR DEAD CROP FIRST!", life: 90 };
       else if (plot.crop.ready) s.notification = { text: "HARVEST FIRST!", life: 90 };
       else s.notification = { text: "PLOT OCCUPIED!", life: 90 };
+      s.farmPlots[idx] = plot;
+      return s;
     } else if (count <= 0) {
       s.notification = { text: `NO ${cropType.toUpperCase()} SEEDS!`, life: 90 };
+      s.farmPlots[idx] = plot;
+      return s;
     } else if (!isCropPlantingUnlocked(cropType, s.player.level, s.farmBalancePreset)) {
       const need = seedUnlockLevel(cropType, s.farmBalancePreset);
       s.notification = { text: `LOCKED — LEVEL ${need}+`, life: 90 };
+      s.farmPlots[idx] = plot;
+      return s;
     } else {
-      plot.crop = makeCrop(cropType, getServerTime(), s.farmBalancePreset);
+      const nowMs = getServerTime();
+      plot.crop = makeCrop(cropType, nowMs, s.farmBalancePreset);
       plot.fertilized = false;
-      plot.stressDrySince = plot.watered ? null : getServerTime();
+      plot.stressDrySince = plot.watered ? null : nowMs;
       s.player.action = "seed" as any;
       s.player.actionTimer = 30;
       attachFarmingEngine(s, plot, tool);
       AudioManager.playSFX("plant");
       s.player.inventory = { ...s.player.inventory, [tool]: count - 1 };
       
-      const cdMap: Record<string, number> = { "wheat-seed": 5000, "tomato-seed": 25000, "carrot-seed": 35000, "pumpkin-seed": 55000 };
-      s.seedCooldowns[tool] = cdMap[tool] || 10000;
+      const cdMap: Record<string, number> = { "wheat-seed": 50, "tomato-seed": 50, "carrot-seed": 50, "pumpkin-seed": 50 };
+      s.seedCooldowns[tool] = cdMap[tool] || 50;
 
       spawnVFX(s, cx, cy, "plant");
       spawnVFX(s, cx, cy, "flash");
@@ -1279,7 +1288,7 @@ export function handleToolAction(
   mouseX?: number,
   mouseY?: number,
 ): GameState {
-  const ns = {
+  let ns = {
     ...s,
     player: { ...s.player },
     farmPlots: [...s.farmPlots],
@@ -1446,7 +1455,7 @@ export function handleToolAction(
       return ns;
     }
     spawnVFX(ns, ns.player.x, ns.player.y - 15, "slash");
-    executePlotAction(ns, targetPlot.id, tool);
+    ns = executePlotAction(ns, targetPlot.id, tool);
   } else {
     ns.pendingPlotAction = { plotId: targetPlot.id, tool };
   }
@@ -1549,7 +1558,7 @@ function makeCrop(
   return {
     id: `c${time}-${Math.random()}`,
     type,
-    plantedAt: getServerTime(),
+    plantedAt: time,
     growTime,
     stage: 0,
     ready: false,

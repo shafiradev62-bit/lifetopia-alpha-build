@@ -284,89 +284,106 @@ export default function FarmingGame() {
     setDs({ ...stateRef.current });
   }, []);
 
-  // ── Wallet detection ──────────────────────────────────────────────────────
+  // ── Wallet detection - AUTO DETECT EXTENSIONS ──────────────────────────────
   useEffect(() => {
     const check = () => {
-      const env = detectWalletEnvironment();
-      setPhantomFound(env.phantomInjected);
-      setMetamaskFound(env.metamaskInjected);
+      const w = window as any;
+      
+      // Auto-detect Phantom
+      const phantomInjected = !!(w.solana?.isPhantom || w.phantom?.solana?.isPhantom);
+      setPhantomFound(phantomInjected);
+      
+      // Auto-detect MetaMask
+      const eth = w.ethereum;
+      const providers = Array.isArray(eth?.providers) ? eth.providers : eth ? [eth] : [];
+      const metamaskInjected = providers.some((p: any) => p?.isMetaMask);
+      setMetamaskFound(metamaskInjected);
+      
+      console.log('[Wallet Detection] Phantom:', phantomInjected, 'MetaMask:', metamaskInjected);
     };
+    
+    // Check immediately on mount
     check();
-    const t = setTimeout(check, 800);
+    
+    // Check again after 500ms (extensions may inject asynchronously)
+    const t = setTimeout(check, 500);
+    
+    // Listen for ethereum provider initialization
     window.addEventListener("ethereum#initialized", check as EventListener, { once: true });
+    
     return () => { clearTimeout(t); window.removeEventListener("ethereum#initialized", check as EventListener); };
   }, []);
 
-  // ── Connect Phantom (with mobile deep link) ───────────────────────────────
+  // ── Connect Phantom - AUTO CONNECT IF EXTENSION INSTALLED ─────────────────
   const connectPhantom = async () => {
-    const env = detectWalletEnvironment();
-    // Mobile: no injected wallet → deep link immediately
-    if (env.isMobile && !env.phantomInjected) {
-      const dappUrl = window.location.href;
-      openWalletDeepLink("phantom", dappUrl);
-      stateRef.current.notification = { text: "OPENING PHANTOM APP...", life: 120 };
-      setDs({ ...stateRef.current });
-      return;
-    }
     try {
       const w = window as any;
       const sol = w.solana ?? w.phantom?.solana;
+      
+      // Check if Phantom extension is installed
       if (!sol?.connect) {
-        if (env.isMobile) { openWalletDeepLink("phantom", window.location.href); return; }
-        window.open("https://phantom.app/download", "_blank");
+        stateRef.current.notification = { text: "PHANTOM NOT INSTALLED", life: 120 };
+        setDs({ ...stateRef.current });
         return;
       }
-      // Instant connect call - no UI updates before extension trigger
+      
+      // Connect immediately - preserves user gesture
       const res = await sol.connect({ onlyIfTrusted: false });
       if (!res || (!res.publicKey && !sol.publicKey)) throw new Error("No public key");
       
-      stateRef.current.notification = { text: "CONNECTING PHANTOM...", life: 100 };
-      setDs({ ...stateRef.current });
-      
       const addr = (res.publicKey || sol.publicKey).toString();
       await _onWalletConnected(addr, "solana", sol);
+      
     } catch (e: any) {
+      console.error("Phantom connection error:", e);
       stateRef.current.notification = { text: (e?.message || "CONNECT FAILED").toUpperCase().slice(0, 40), life: 120 };
       setDs({ ...stateRef.current });
     }
   };
 
-  // ── Connect MetaMask (with mobile deep link) ──────────────────────────────
+  // ── Connect MetaMask - AUTO CONNECT IF EXTENSION INSTALLED ────────────────
   const connectMetaMask = async () => {
     try {
-      // Direct detection: check window.ethereum first
+      // Direct provider detection
       let provider = (window as any).ethereum;
       
-      // Handle multiple providers (e.g. MetaMask + Brave)
+      // Handle multiple providers
       if (provider?.providers) {
         provider = provider.providers.find((p: any) => p.isMetaMask) || provider.providers[0];
       }
       
       if (!provider) {
-        // Fallback to manual link ONLY if no provider found after attempt
-        stateRef.current.notification = { text: "METAMASK NOT FOUND", life: 100 };
+        stateRef.current.notification = { text: "METAMASK NOT INSTALLED", life: 100 };
         setDs({ ...stateRef.current });
-        window.open("https://metamask.io/download/", "_blank");
         return;
       }
       
-      stateRef.current.notification = { text: "SYNCING WALLET...", life: 100 };
-      setDs({ ...stateRef.current });
-      
-      // Force request accounts immediately
+      // Request accounts IMMEDIATELY - preserves user gesture
       const accounts = await provider.request({ method: "eth_requestAccounts" });
       const addr = accounts?.[0];
       if (!addr) throw new Error("Connection rejected");
       
       await _onWalletConnected(addr, "evm", provider);
+      
     } catch (e: any) {
+      console.error("MetaMask connection error:", e);
       stateRef.current.notification = { text: (e?.message || "CONNECT FAILED").toUpperCase().slice(0, 40), life: 120 };
       setDs({ ...stateRef.current });
     }
   };
 
   const _onWalletConnected = async (addr: string, type: "solana" | "evm", provider: any) => {
-    // 1. Immediate UI update for connectivity
+    // 1. Critical: Request SIWS signature IMMEDIATELY before ANY async operations
+    // This maintains the browser's user-gesture context for instant popup (< 0.5s)
+    let proof: any = null;
+    try {
+      proof = await (type === "solana" ? signSolanaLogin(provider, addr) : signEvmLogin(provider, addr));
+    } catch (e) {
+      // Continue even if signature fails - don't block the connection
+      console.warn("Signature request failed or rejected:", e);
+    }
+
+    // 2. Immediate UI update for connectivity - minimal state changes
     setWalletAddress(addr);
     setWalletType(type);
     setWalletConnected(true);
@@ -374,35 +391,39 @@ export default function FarmingGame() {
     localStorage.setItem("wallet_type", type);
     stateRef.current.player.walletAddress = addr;
     
-    // 2. Parallelize backend & on-chain verification for maximum speed
-    const [loadRes, nftRes, proof] = await Promise.all([
-      loadProgress(addr), // Load Supabase stats
-      type === "solana" ? checkSolanaNFT(addr) : Promise.resolve(false), // Check tokens
-      type === "solana" ? signSolanaLogin(provider, addr) : signEvmLogin(provider, addr), // SIWS
-    ]);
-
-    // 3. Post-sync UI & Logic updates
-    setInitialLoadComplete(false);
-    
-    if (proof) {
-      verifyWalletWithSupabase(proof).catch(console.error);
-    }
-
+    // 3. Trigger notification immediately
     const notifText = type === "solana" ? "PHANTOM CONNECTED!" : "METAMASK CONNECTED!";
     stateRef.current.notification = { text: notifText, life: 120 };
     triggerPopup(notifText);
-
-    if (type === "solana" && nftRes) {
-      const boost = applyNFTBoostsToState(true);
-      stateRef.current.farmingSpeedMultiplier = boost.farmingSpeedMultiplier;
-      stateRef.current.nftBoostActive = boost.nftBoostActive;
-      const boostText = "ALPHA NFT — FARM SPEED BOOST!";
-      stateRef.current.notification = { text: boostText, life: 3000 };
-      triggerPopup(boostText);
-    }
-
     setDs({ ...stateRef.current });
-    await saveProgress();
+    
+    // 4. Parallelize all background operations - don't await sequentially
+    Promise.all([
+      loadProgress(addr),
+      type === "solana" ? checkSolanaNFT(addr) : Promise.resolve(false),
+    ]).then(([_, nftRes]) => {
+      // Post-sync UI updates after data is loaded
+      setInitialLoadComplete(false);
+      
+      if (proof) {
+        verifyWalletWithSupabase(proof).catch(console.error);
+      }
+
+      if (type === "solana" && nftRes) {
+        const boost = applyNFTBoostsToState(true);
+        stateRef.current.farmingSpeedMultiplier = boost.farmingSpeedMultiplier;
+        stateRef.current.nftBoostActive = boost.nftBoostActive;
+        const boostText = "ALPHA NFT — FARM SPEED BOOST!";
+        stateRef.current.notification = { text: boostText, life: 3000 };
+        triggerPopup(boostText);
+      }
+
+      setDs({ ...stateRef.current });
+      saveProgress().catch(console.error);
+    }).catch((err) => {
+      console.error("Background wallet operations failed:", err);
+      setInitialLoadComplete(true);
+    });
   };
 
   const disconnectWallet = () => {
@@ -425,7 +446,13 @@ export default function FarmingGame() {
         stateRef.current.player.exp = exp;
         stateRef.current.player.level = level;
         stateRef.current.player.maxExp = typeof data.max_exp === "number" ? data.max_exp : stateRef.current.player.maxExp;
-        stateRef.current.player.inventory = (data.inventory as GameState["player"]["inventory"]) || stateRef.current.player.inventory;
+        // Merge: DB/localStorage may store `{}` — empty object is truthy and would wipe default seeds
+        if (data.inventory != null && typeof data.inventory === "object" && !Array.isArray(data.inventory)) {
+          stateRef.current.player.inventory = {
+            ...stateRef.current.player.inventory,
+            ...(data.inventory as GameState["player"]["inventory"]),
+          };
+        }
         stateRef.current.player.nftEligibility = !!data.nft_eligibility;
         if (data.nfts && Array.isArray(data.nfts)) setNfts(data.nfts as string[]);
         applyStoredQuestClaims(stateRef.current, addr);
@@ -681,11 +708,8 @@ export default function FarmingGame() {
       }
 
       const prevNotif = stateRef.current.notification?.text;
-      
-      const isFrozen = !walletConnected && !stateRef.current.demoMode && splashDone && introTutorialDone;
-      if (!isFrozen) {
-        stateRef.current = updateGame(stateRef.current, dt);
-      }
+
+      stateRef.current = updateGame(stateRef.current, dt);
       
       const newNotif = stateRef.current.notification?.text;
       if (newNotif && newNotif !== prevNotif) triggerPopup(newNotif);
@@ -707,7 +731,7 @@ export default function FarmingGame() {
     };
     animRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animRef.current);
-  }, [loaded, walletConnected, splashDone, introTutorialDone]);
+  }, [loaded, splashDone, introTutorialDone]);
 
   // ── Tool selection ────────────────────────────────────────────────────────
   const selectTool = (toolId: string) => {
@@ -884,6 +908,16 @@ export default function FarmingGame() {
     top: isMobile ? 0 : "50%",
     transform: isMobile ? "none" : "translateY(-50%)",
   };
+  
+  // Mobile landscape scaling
+  const mobileGameScale = isMobile ? 0.6 : 1;
+  const gameContainerStyle: React.CSSProperties = {
+    transform: `scale(${mobileGameScale})`,
+    transformOrigin: "center center",
+    width: "100%",
+    height: "100%",
+    position: "relative",
+  };
 
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
@@ -942,7 +976,7 @@ export default function FarmingGame() {
 
       {/* ── CANVAS ── */}
       {/* ── CINEMATIC DEMO OVERLAY (Letterbox) ── */}
-
+      <div style={isMobile ? gameContainerStyle : undefined}>
       <canvas
         ref={canvasRef}
         width={1280}
@@ -959,6 +993,7 @@ export default function FarmingGame() {
         onTouchEnd={onTouchEnd}
         style={{ display: "block", width: isMobile ? "auto" : "100%", height: isMobile ? "auto" : "100%", maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "crosshair", touchAction: "none", imageRendering: "pixelated" }}
       />
+      </div>
 
       {/* ── MOBILE QUADRANT CONTROLLER ── */}
       {isMobile && splashDone && introTutorialDone && !activePanel && (
@@ -1282,11 +1317,11 @@ export default function FarmingGame() {
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                       <div style={{ fontSize: 8, color: "#FFFFFF", marginBottom: 4 }}>SELECT WALLET</div>
-                      <button className="wb gf" onClick={() => { connectPhantom(); AudioManager.playSFX("click"); }} style={{ fontSize: 10, padding: "18px", background: phantomFound ? "linear-gradient(180deg, #777, #555)" : "linear-gradient(180deg, #5A6272, #3A4150)", border: "2px solid #FFFFFF", color: "#FFFFFF" }}>
-                        {phantomFound ? "CONNECT PHANTOM" : isMobile ? "OPEN PHANTOM APP" : "INSTALL PHANTOM"}
+                      <button className="wb gf" onClick={() => { connectPhantom(); AudioManager.playSFX("click"); }} style={{ fontSize: 10, padding: "18px", background: phantomFound ? "linear-gradient(180deg, #ab9ff2, #512da8)" : "linear-gradient(180deg, #5A6272, #3A4150)", border: "2px solid #FFFFFF", color: "#FFFFFF" }}>
+                        {phantomFound ? "CONNECT PHANTOM" : "PHANTOM NOT FOUND"}
                       </button>
-                      <button className="wb gf" onClick={() => { connectMetaMask(); AudioManager.playSFX("click"); }} style={{ fontSize: 10, padding: "18px", background: metamaskFound ? "linear-gradient(180deg, #777, #555)" : "linear-gradient(180deg, #5A6272, #3A4150)", border: "2px solid #FFFFFF", color: "#FFFFFF" }}>
-                        CONNECT METAMASK
+                      <button className="wb gf" onClick={() => { connectMetaMask(); AudioManager.playSFX("click"); }} style={{ fontSize: 10, padding: "18px", background: metamaskFound ? "linear-gradient(180deg, #f6851b, #be630a)" : "linear-gradient(180deg, #5A6272, #3A4150)", border: "2px solid #FFFFFF", color: "#FFFFFF" }}>
+                        {metamaskFound ? "CONNECT METAMASK" : "METAMASK NOT FOUND"}
                       </button>
                     </div>
                   )}

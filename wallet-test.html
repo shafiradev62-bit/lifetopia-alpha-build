@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet Connection Test - Lifetopia</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            color: white;
+        }
+        .container {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            max-width: 600px;
+            width: 90%;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .status {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+        .wallet-btn {
+            width: 100%;
+            padding: 20px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+        }
+        .phantom-btn {
+            background: linear-gradient(180deg, #ab9ff2 0%, #512da8 100%);
+            color: white;
+            border: 2px solid #ab9ff2;
+        }
+        .metamask-btn {
+            background: linear-gradient(180deg, #f6851b 0%, #be630a 100%);
+            color: white;
+            border: 2px solid #f6851b;
+        }
+        .wallet-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+        .wallet-btn:active {
+            transform: translateY(0);
+        }
+        .wallet-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .log {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            font-family: 'Consolas', monospace;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #4CAF50;
+            padding-left: 10px;
+        }
+        .log-entry.error {
+            border-left-color: #f44336;
+            color: #ffcdd2;
+        }
+        .log-entry.success {
+            border-left-color: #4CAF50;
+            color: #c8e6c9;
+        }
+        .log-entry.info {
+            border-left-color: #2196F3;
+            color: #bbdefb;
+        }
+        .detection-status {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .detect-item {
+            flex: 1;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            text-align: center;
+            font-size: 14px;
+        }
+        .detect-item.found {
+            background: rgba(76, 175, 80, 0.3);
+            border: 2px solid #4CAF50;
+        }
+        .detect-item.not-found {
+            background: rgba(244, 67, 54, 0.3);
+            border: 2px solid #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 LIFETOPIA WALLET TEST</h1>
+        <div class="status" id="connectionStatus">Not Connected</div>
+        
+        <div class="detection-status">
+            <div class="detect-item not-found" id="phantomStatus">
+                🔴 Phantom<br>Not Found
+            </div>
+            <div class="detect-item not-found" id="metamaskStatus">
+                🔴 MetaMask<br>Not Found
+            </div>
+        </div>
+
+        <button class="wallet-btn phantom-btn" id="connectPhantom" onclick="connectPhantom()">
+            🔗 Connect Phantom
+        </button>
+        <button class="wallet-btn metamask-btn" id="connectMetaMask" onclick="connectMetaMask()">
+            🔗 Connect MetaMask
+        </button>
+
+        <div class="log" id="logContainer"></div>
+    </div>
+
+    <script>
+        let isConnected = false;
+        let walletAddress = '';
+        let walletType = '';
+
+        // Logger
+        function log(message, type = 'info') {
+            const logContainer = document.getElementById('logContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        // Detect wallets
+        function detectWallets() {
+            const w = window;
+            
+            // Phantom detection
+            const phantomFound = !!(w.solana?.isPhantom || w.phantom?.solana?.isPhantom);
+            const phantomEl = document.getElementById('phantomStatus');
+            if (phantomFound) {
+                phantomEl.className = 'detect-item found';
+                phantomEl.innerHTML = '🟢 Phantom<br>Detected';
+                log('Phantom wallet detected!', 'success');
+            } else {
+                phantomEl.className = 'detect-item not-found';
+                phantomEl.innerHTML = '🔴 Phantom<br>Not Found';
+                log('Phantom wallet not found', 'info');
+            }
+
+            // MetaMask detection
+            const eth = w.ethereum;
+            const providers = Array.isArray(eth?.providers) ? eth.providers : eth ? [eth] : [];
+            const metamaskFound = providers.some(p => p?.isMetaMask);
+            const metamaskEl = document.getElementById('metamaskStatus');
+            if (metamaskFound) {
+                metamaskEl.className = 'detect-item found';
+                metamaskEl.innerHTML = '🟢 MetaMask<br>Detected';
+                log('MetaMask wallet detected!', 'success');
+            } else {
+                metamaskEl.className = 'detect-item not-found';
+                metamaskEl.innerHTML = '🔴 MetaMask<br>Not Found';
+                log('MetaMask wallet not found', 'info');
+            }
+
+            return { phantomFound, metamaskFound };
+        }
+
+        // Connect Phantom
+        async function connectPhantom() {
+            log('Attempting to connect Phantom...', 'info');
+            
+            try {
+                const w = window;
+                const sol = w.solana ?? w.phantom?.solana;
+                
+                if (!sol?.connect) {
+                    log('Phantom not found! Opening download page...', 'error');
+                    window.open('https://phantom.app/download', '_blank');
+                    return;
+                }
+
+                log('Requesting Phantom connection...', 'info');
+                const res = await sol.connect({ onlyIfTrusted: false });
+                
+                if (!res || (!res.publicKey && !sol.publicKey)) {
+                    throw new Error('No public key received');
+                }
+
+                const addr = (res.publicKey || sol.publicKey).toString();
+                onWalletConnected(addr, 'solana');
+                
+            } catch (error) {
+                log(`Phantom connection failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Connect MetaMask
+        async function connectMetaMask() {
+            log('Attempting to connect MetaMask...', 'info');
+            
+            try {
+                let provider = window.ethereum;
+                
+                if (provider?.providers) {
+                    provider = provider.providers.find(p => p.isMetaMask) || provider.providers[0];
+                }
+                
+                if (!provider) {
+                    log('MetaMask not found! Opening download page...', 'error');
+                    window.open('https://metamask.io/download/', '_blank');
+                    return;
+                }
+
+                log('Requesting MetaMask connection...', 'info');
+                const accounts = await provider.request({ method: 'eth_requestAccounts' });
+                
+                if (!accounts?.[0]) {
+                    throw new Error('Connection rejected');
+                }
+
+                const addr = accounts[0];
+                onWalletConnected(addr, 'evm');
+                
+            } catch (error) {
+                log(`MetaMask connection failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Handle successful connection
+        function onWalletConnected(address, type) {
+            isConnected = true;
+            walletAddress = address;
+            walletType = type;
+            
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.textContent = `✅ Connected (${type.toUpperCase()})`;
+            statusEl.style.background = 'rgba(76, 175, 80, 0.3)';
+            statusEl.style.border = '2px solid #4CAF50';
+            
+            const shortAddr = `${address.slice(0, 6)}...${address.slice(-4)}`;
+            log(`✅ Wallet connected successfully!`, 'success');
+            log(`Address: ${shortAddr}`, 'success');
+            log(`Type: ${type.toUpperCase()}`, 'success');
+            
+            // Store in localStorage (mimics the real app behavior)
+            localStorage.setItem('wallet_addr', address);
+            localStorage.setItem('wallet_type', type);
+        }
+
+        // Initialize on load
+        window.addEventListener('load', () => {
+            log('Wallet test page loaded', 'info');
+            detectWallets();
+            
+            // Check if already connected
+            const savedAddr = localStorage.getItem('wallet_addr');
+            const savedType = localStorage.getItem('wallet_type');
+            if (savedAddr && savedType) {
+                onWalletConnected(savedAddr, savedType);
+            }
+        });
+
+        // Auto-detect wallet changes
+        window.addEventListener('ethereum#initialized', () => {
+            log('Ethereum provider initialized', 'info');
+            detectWallets();
+        }, { once: true });
+    </script>
+</body>
+</html>

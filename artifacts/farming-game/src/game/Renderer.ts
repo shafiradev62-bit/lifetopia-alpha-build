@@ -650,7 +650,7 @@ function drawFarmPlots(
 
       const currentStage = Math.max(0, Math.min(4, crop.stage));
       const stageScales = [0.25, 0.55, 0.8, 1.0, 1.25];
-      const stageYOffsets = [12, 8, 4, 0, -6];
+      const stageYOffsets = [6, 4, 2, 0, -8];
       const stageImageSizes = [28, 40, 52, 60, 68];
       
       const baseScale = stageScales[currentStage];
@@ -726,7 +726,8 @@ function drawFarmPlots(
         ctx.scale(pulse, pulse);
       }
       
-      if (img && img.complete) {
+      const imgOk = img && img.complete && img.naturalWidth > 0;
+      if (imgOk) {
         if (currentStage === 0) {
           const worldSize = 36;
           const drawSize = worldSize / scale;
@@ -734,6 +735,13 @@ function drawFarmPlots(
         } else {
           ctx.drawImage(img, -imageSize / 2, -imageSize, imageSize, imageSize);
         }
+      } else {
+        const cols = CROP_STAGES_COLORS[crop.type] ?? ["#90EE90", "#8B7355", "#5D4037"];
+        const fill = cols[Math.min(currentStage, cols.length - 1)] ?? "#90EE90";
+        ctx.fillStyle = fill;
+        const ph = currentStage === 0 ? 14 : imageSize * 0.55;
+        const pw = currentStage === 0 ? 10 : imageSize * 0.5;
+        ctx.fillRect(-pw / 2, -ph, pw, ph);
       }
       ctx.restore();
 
