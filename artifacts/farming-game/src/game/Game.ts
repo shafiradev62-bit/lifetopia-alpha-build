@@ -58,7 +58,7 @@ export interface Crop {
   dead?: boolean;
 }
 
-export type VFXType = "dust" | "plant" | "harvest" | "coin" | "sparkle" | "flash" | "slash" | "drop" | "water" | "leaf" | "bubble";
+export type VFXType = "dust" | "plant" | "harvest" | "coin" | "sparkle" | "flash" | "slash" | "drop" | "water" | "leaf" | "petal" | "bubble";
 
 export interface FarmPlot {
   id: string;

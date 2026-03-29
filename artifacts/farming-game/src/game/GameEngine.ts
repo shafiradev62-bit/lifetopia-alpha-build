@@ -560,11 +560,38 @@ export function updateGame(state: GameState, dt: number): GameState {
   }
   if (s.player.action === "fertilizer" && s.player.actionTimer > 0) {
     const p = s.player;
-    // Magic glowing dust for fertilizer
     if (Math.random() > 0.5) {
       spawnVFX(s, p.x + (Math.random() - 0.5) * 40, p.y, "sparkle");
       spawnVFX(s, p.x + (Math.random() - 0.5) * 40, p.y + 10, "dust");
     }
+  }
+
+  // AMBIENT LIFE: Wind-blown leaves and petals (Nature Immersion)
+  // Higher frequency (was 0.02) and more color variety
+  if (Math.random() < 0.04) {
+    const side = Math.random() > 0.5;
+    const wx = side ? -20 : 1300;
+    const wy = Math.random() * 720;
+    const isLeaf = Math.random() > 0.4;
+    
+    // Random color palette for variety
+    const greenCols = ["#4CAF50", "#2E7D32", "#81C784"];
+    const petalCols = ["#FFCDD2", "#F48FB1", "#FFFFFF", "#E1BEE7"];
+    
+    s.vfxParticles.push({
+      id: `leaf-${s.particleId++}`,
+      x: wx,
+      y: wy,
+      vx: side ? 1.5 + Math.random() * 2 : -1.5 - Math.random() * 2,
+      vy: 0.5 + Math.sin(s.time / 1000) * 0.5,
+      life: 250 + Math.random() * 150,
+      maxLife: 400,
+      size: 4 + Math.random() * 4,
+      color: isLeaf 
+        ? greenCols[Math.floor(Math.random() * greenCols.length)] 
+        : petalCols[Math.floor(Math.random() * petalCols.length)],
+      type: isLeaf ? "leaf" : "petal",
+    });
   }
 
   // Update hovered plot (nearest plot to player)
@@ -1102,14 +1129,24 @@ function updateDamageNumbers(s: GameState) {
     .filter((d) => d.life > 0);
 }
 function updatePlayerAnim(s: GameState, dt: number) {
-  s.player.animTimer += dt;
-  const frameTime = s.player.running ? 5 : 8;
-  if (s.player.animTimer >= frameTime) {
-    s.player.animTimer = 0;
-    if (s.player.moving) {
-      s.player.animFrame = (s.player.animFrame + 1) % 4;
+  const p = s.player;
+  p.animTimer += dt;
+  const frameTime = p.running ? 6 : 10;
+  if (p.animTimer >= frameTime) {
+    p.animTimer = 0;
+    if (p.moving || p.targetX !== null) {
+      const oldFrame = p.animFrame;
+      p.animFrame = (p.animFrame + 1) % 4;
+      
+      // STEP SOUND & DUST TRAIL: Trigger on specific weight-down frames (1 and 3)
+      if (p.animFrame !== oldFrame && (p.animFrame === 1 || p.animFrame === 3)) {
+         if (s.currentMap !== "fishing") {
+           AudioManager.playSFX("step", 0.28);
+           spawnVFX(s, p.x, p.y, "dust"); // Soft dust puff
+         }
+      }
     } else {
-      s.player.animFrame = 0;
+      p.animFrame = 0;
     }
   }
 }
@@ -1560,6 +1597,12 @@ export function switchMap(s: GameState, map: MapType): GameState {
   ns.cameraX = 0;
   ns.cameraY = 0;
   rollMarketTrend(ns);
+  
+  // Ambient Music / Soundscape Logic
+  if (map === "home") AudioManager.setMapAmbient("farm_wind");
+  else if (map === "suburban") AudioManager.setMapAmbient("suburban_birds");
+  else AudioManager.setMapAmbient("none");
+  
   return ns;
 }
 

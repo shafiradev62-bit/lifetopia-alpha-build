@@ -18,10 +18,12 @@ class AudioController {
     hoe: "https://assets.mixkit.co/sfx/preview/mixkit-digging-ground-dirt-mechanic-2420.mp3",
     water: "https://assets.mixkit.co/sfx/preview/mixkit-splashing-water-in-pool-1187.mp3",
     plant: "https://assets.mixkit.co/sfx/preview/mixkit-small-item-drop-on-ground-2121.mp3",
-    harvest: "https://assets.mixkit.co/sfx/preview/mixkit-magical-coin-win-1936.mp3",
+    harvest: "https://assets.mixkit.co/sfx/preview/mixkit-melodic-gold-price-2000.mp3",
     levelUp: "https://assets.mixkit.co/sfx/preview/mixkit-winning-an-extra-bonus-2098.mp3",
     buy: "https://assets.mixkit.co/sfx/preview/mixkit-coins-handling-1939.mp3",
     fail: "https://assets.mixkit.co/sfx/preview/mixkit-wrong-answer-fail-notification-947.mp3",
+    step: "https://assets.mixkit.co/sfx/preview/mixkit-grass-footstep-2342.mp3",
+    wind: "https://assets.mixkit.co/sfx/preview/mixkit-wind-nature-ambience-1144.mp3",
   };
 
   constructor() {
@@ -36,7 +38,7 @@ class AudioController {
   }
 
   /** Extra quiet layer (e.g. bird ambience on Suburban) without replacing main BGM. */
-  public setMapAmbient(kind: "none" | "suburban_birds") {
+  public setMapAmbient(kind: "none" | "suburban_birds" | "farm_wind") {
     if (!this.initialized) this.init();
     if (!this.mapLayer) return;
     if (kind === "none") {
@@ -44,13 +46,15 @@ class AudioController {
       this.mapLayer.src = "";
       return;
     }
-    const url =
-      "https://assets.mixkit.co/sfx/preview/mixkit-bird-chirp-at-morning-2468.mp3";
+    const url = kind === "farm_wind"
+      ? "https://assets.mixkit.co/sfx/preview/mixkit-wind-nature-ambience-1144.mp3"
+      : "https://assets.mixkit.co/sfx/preview/mixkit-bird-chirp-at-morning-2468.mp3";
+    
     if (this.mapLayer.src !== url) {
       this.mapLayer.src = url;
       this.mapLayer.load();
     }
-    this.mapLayer.volume = 0.14;
+    this.mapLayer.volume = kind === "farm_wind" ? 0.08 : 0.14;
     if (this.initialized) {
       this.mapLayer.play().catch(() => {});
     }
@@ -132,7 +136,7 @@ class AudioController {
   /**
    * Plays a one-shot SFX
    */
-  public playSFX(type: string) {
+  public playSFX(type: string, volume: number = 0.5) {
     if (!this.initialized) {
         this.init(); // Auto-init on SFX if possible
     }
@@ -149,7 +153,7 @@ class AudioController {
         }
 
         const instance = sound.cloneNode(true) as HTMLAudioElement;
-        instance.volume = 0.5;
+        instance.volume = volume;
         instance.play().catch(() => {
             // Silently fail SFX if not ready
         });

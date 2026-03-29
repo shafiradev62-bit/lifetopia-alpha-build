@@ -649,7 +649,6 @@ function drawFarmPlots(
       if (imgId && !imgs[imgId]) loadImg(imgId);
 
       const currentStage = Math.max(0, Math.min(4, crop.stage));
-      // Visual feedback: stage 0 is very tiny (just planted)
       const stageScales = [0.25, 0.55, 0.8, 1.0, 1.25];
       const stageYOffsets = [12, 8, 4, 0, -6];
       const stageImageSizes = [28, 40, 52, 60, 68];
@@ -659,11 +658,14 @@ function drawFarmPlots(
       const imageSize = stageImageSizes[currentStage];
 
       let scale = baseScale;
-      let tiltAngle = 0;
+      // WIND SWAY: Organic movement for all living crops
+      let tiltAngle = Math.sin(now / 1200 + plot.gridX * 0.5 + plot.gridY * 0.3) * 0.04;
       let shadowScaleX = 1;
+      
       if (crop.ready) {
-        tiltAngle = Math.sin(now / 600) * 0.1;
-        scale = baseScale + Math.abs(Math.sin(now / 600 * 1.3)) * 0.05;
+        // More active swaying for ready crops (Excitement!)
+        tiltAngle = Math.sin(now / 600) * 0.12;
+        scale = baseScale + Math.abs(Math.sin(now / 600 * 1.3)) * 0.06;
         shadowScaleX = 1 + Math.abs(Math.sin(now / 600)) * 0.15;
       }
 
@@ -677,13 +679,34 @@ function drawFarmPlots(
       ctx.fill();
       ctx.restore();
 
-      let jx = 1,
-        jy = 1;
+      // Plot Juice (Interaction Bounce)
+      let jx = 1, jy = 1;
       if (state.plotJuice?.plotId === plot.id) {
         const u = state.plotJuice.until - now;
         const pulse = Math.sin(Math.max(0, Math.min(1, u / 380)) * Math.PI);
         jx = 1 + 0.18 * pulse;
         jy = 1 - 0.12 * pulse;
+      }
+
+      // PENDING ACTION INDICATOR: Pulse over targeted plot
+      if (state.pendingPlotAction?.plotId === plot.id) {
+         ctx.save();
+         const pPulse = Math.abs(Math.sin(now / 350));
+         ctx.strokeStyle = `rgba(255, 215, 0, ${0.4 + pPulse * 0.5})`;
+         ctx.lineWidth = 2;
+         ctx.setLineDash([4, 4]); // Dashed aesthetic
+         ctx.beginPath();
+         ctx.arc(cx, by - 15, 12 + pPulse * 4, 0, Math.PI * 2);
+         ctx.stroke();
+         
+         // Little arrow or indicator pointing down
+         ctx.fillStyle = `rgba(255, 215, 0, ${0.4 + pPulse * 0.5})`;
+         ctx.beginPath();
+         ctx.moveTo(cx - 3, by - 35 - pPulse * 5);
+         ctx.lineTo(cx + 3, by - 35 - pPulse * 5);
+         ctx.lineTo(cx, by - 28 - pPulse * 5);
+         ctx.fill();
+         ctx.restore();
       }
 
       ctx.save();
@@ -692,14 +715,12 @@ function drawFarmPlots(
       ctx.scale(scale * jx, scale * jy);
 
       if (crop.isRare) {
-        // Hue rotate via composite instead of heavy filter
         ctx.shadowColor = '#FFD700';
         ctx.shadowBlur = 12;
       } else if (crop.dead) {
-        ctx.globalAlpha *= 0.7; // Brighter and faster than grayscale filter
+        ctx.globalAlpha *= 0.7; 
       } else if (currentStage === 0 && !plot.watered) {
         ctx.globalAlpha *= 0.5;
-        // Optimization: removed heavy grayscale filter for instart color
       } else if (currentStage < 4 && plot.watered) {
         const pulse = 1 + Math.sin(now / 400) * 0.05;
         ctx.scale(pulse, pulse);
@@ -707,8 +728,6 @@ function drawFarmPlots(
       
       if (img && img.complete) {
         if (currentStage === 0) {
-          // Stage 0: draw at a fixed world size, ignoring the tiny 0.45 scale
-          // We're inside ctx.scale(0.45, 0.45) so divide by scale to get real pixels
           const worldSize = 36;
           const drawSize = worldSize / scale;
           ctx.drawImage(img, -drawSize / 2, -drawSize, drawSize, drawSize);
@@ -726,54 +745,78 @@ function drawMarketBulletin(ctx: CanvasRenderingContext2D, state: GameState) {
   const trend = state.marketTrendCrop;
   if (!trend) return;
   const label = trend.charAt(0).toUpperCase() + trend.slice(1);
-  const bx = 400;
-  const by = 108;
+  const bx = 415;
+  const by = 135; // Moved slightly for better layout flow
+  
   ctx.save();
   ctx.translate(bx, by);
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  roundRect(ctx, -108, -42 + 4, 216, 84, 12);
+  
+  // High-End Wood Texture Shadow
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  roundRect(ctx, -120, -50 + 4, 240, 95, 12);
   ctx.fill();
-  ctx.fillStyle = "#4E342E";
-  roundRect(ctx, -108, -42, 216, 84, 12);
+
+  // Premium Sign Base
+  const sig = ctx.createLinearGradient(0, -50, 0, 45);
+  sig.addColorStop(0, "#5D4037");
+  sig.addColorStop(1, "#3E2723");
+  ctx.fillStyle = sig;
+  roundRect(ctx, -120, -50, 240, 95, 12);
   ctx.fill();
-  ctx.strokeStyle = "#5C4033";
-  ctx.lineWidth = 3;
-  roundRect(ctx, -108, -42, 216, 84, 12);
+  
+  // Inner Inset for 'Bulletin' Feel
+  ctx.strokeStyle = "#8D6E63";
+  ctx.lineWidth = 2;
+  roundRect(ctx, -114, -44, 228, 83, 8);
   ctx.stroke();
-  ctx.fillStyle = "rgba(255,255,255,0.14)";
-  roundRect(ctx, -102, -36, 204, 22, 8);
+
+  // Header Bar
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  roundRect(ctx, -114, -44, 228, 25, 8);
   ctx.fill();
-  ctx.fillStyle = "#FFD700";
-  ctx.font = 'bold 8px "Press Start 2P", monospace';
+  
+  ctx.fillStyle = "#FFD54F";
+  ctx.font = 'bold 9px "Press Start 2P", monospace';
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("BULLETIN BOARD", 0, -26);
+  ctx.fillText("DAILY MARKET", 0, -28);
+
   ctx.fillStyle = "#FFFDE7";
-  ctx.font = '7px "Press Start 2P", monospace';
-  ctx.fillText(`TODAY'S DEMAND: ${label}`, 0, -2);
+  ctx.font = '8px "Press Start 2P", monospace';
+  ctx.fillText(`HOT DEMAND: ${label}`, 0, 10);
+  
+  // Bonus Tag (Pulsing)
+  const pulse = 0.8 + Math.sin(state.time / 400) * 0.2;
+  ctx.globalAlpha = pulse;
   ctx.fillStyle = "#A5D6A7";
-  ctx.font = '6px "Press Start 2P", monospace';
-  ctx.fillText("HARVEST BONUS: +20% GOLD", 0, 18);
+  ctx.font = '7px "Press Start 2P", monospace';
+  ctx.fillText("+20% GOLD BONUS", 0, 32);
+
   ctx.restore();
 }
 
 function drawTrees(ctx: CanvasRenderingContext2D, state: GameState) {
   if (!state.trees) return;
+  const now = state.time;
+  
   for (const tree of state.trees) {
+    // Subtle wind sway for all world objects
+    const wind = Math.sin(now / 1500 + tree.x * 0.05) * 0.025;
+    
     ctx.save();
     ctx.translate(tree.x, tree.y);
+    ctx.rotate(wind);
 
     // Shadow
-    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, 25);
+    const shadowSize = 25 + Math.sin(now / 1000) * 2;
+    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, shadowSize);
     shadow.addColorStop(0, "rgba(0,0,0,0.3)");
     shadow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = shadow;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 25, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, shadowSize, 8, 0, 0, Math.PI * 2);
     ctx.fill();
 
     if (tree.type === "rock") {
-      // Rock/Boulder
       ctx.fillStyle = "#777";
       ctx.beginPath();
       ctx.ellipse(0, -10, 24, 18, 0, 0, Math.PI * 2);
@@ -781,30 +824,10 @@ function drawTrees(ctx: CanvasRenderingContext2D, state: GameState) {
       ctx.fillStyle = "#999";
       ctx.beginPath();
       ctx.ellipse(-8, -14, 10, 6, 0.4, 0, Math.PI * 2);
-      ctx.fill(); // Highlight
+      ctx.fill();
     } else if (tree.type === "pine") {
-      // Trunk
       ctx.fillStyle = "#4A2C08";
       ctx.fillRect(-6, -15, 12, 15);
-      // Leaves
-      ctx.fillStyle = "#1A3C1A";
-      ctx.beginPath();
-      ctx.moveTo(0, -65);
-      ctx.lineTo(30, -35);
-      ctx.lineTo(-30, -35);
-      ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(0, -50);
-      ctx.lineTo(35, -20);
-      ctx.lineTo(-35, -20);
-      ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(0, -35);
-      ctx.lineTo(40, -5);
-      ctx.lineTo(-40, -5);
-      ctx.closePath();
       ctx.fill();
     } else {
       // Oak
@@ -1453,16 +1476,34 @@ function drawVFX(ctx: CanvasRenderingContext2D, state: GameState) {
       ctx.arc(p.x, p.y, sSize * 0.4, 0, Math.PI * 2);
       ctx.fill();
 
-    } else if (p.type === "leaf") {
-      // Detailed pixel leaf with rotation
+    } else if (p.type === "leaf" || p.type === "petal") {
+      // Detailed organic particle with rotation and scale wave
       const ps = s * 0.8;
       ctx.save();
       ctx.translate(p.x, p.y);
-      ctx.rotate(p.life * 0.1);
+      ctx.rotate(p.life * (p.type === "leaf" ? 0.05 : 0.08));
+      const sway = Math.sin(p.life * 0.1) * 0.2;
+      ctx.scale(1 + sway, 1 - sway);
       ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.ellipse(0, 0, ps, ps * 0.5, 0, 0, Math.PI * 2);
+      if (p.type === "leaf") {
+         ctx.ellipse(0, 0, ps, ps * 0.5, 0, 0, Math.PI * 2);
+      } else {
+         // Petal shape
+         ctx.moveTo(0, -ps);
+         ctx.quadraticCurveTo(ps, -ps, ps, 0);
+         ctx.quadraticCurveTo(ps, ps, 0, ps);
+         ctx.quadraticCurveTo(-ps, ps, -ps, 0);
+         ctx.quadraticCurveTo(-ps, -ps, 0, -ps);
+      }
       ctx.fill();
+      // Detail vein
+      ctx.strokeStyle = "rgba(0,0,0,0.15)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-ps, 0);
+      ctx.lineTo(ps, 0);
+      ctx.stroke();
       ctx.restore();
 
     } else {
