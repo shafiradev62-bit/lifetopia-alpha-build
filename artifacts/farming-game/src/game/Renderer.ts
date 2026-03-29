@@ -599,23 +599,48 @@ function drawFarmPlots(
     if (!plot.crop) continue;
 
     ctx.save();
+    const by = drawY + cellH - 12;
+    
+    // 3. NFT Boost Visual — Green Glow (GDD 5 Bonus)
+    if (state.nftBoostActive) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const glow = ctx.createRadialGradient(cx, by - 10, 0, cx, by - 10, cellW * 0.45);
+      glow.addColorStop(0, "rgba(100, 255, 100, 0.2)");
+      glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(cx, by - 10, cellW * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Bonus: Micro green sparkles
+      const t = state.time;
+      for (let i = 0; i < 3; i++) {
+        const offX = Math.sin(t / 400 + i * 2) * 12;
+        const offY = Math.cos(t / 300 + i * 3) * 8 - 15;
+        ctx.fillStyle = "#A2FF9E";
+        ctx.globalAlpha = 0.5 + Math.sin(t / 200 + i) * 0.3;
+        ctx.fillRect(cx + offX, by + offY, 1.5, 1.5);
+      }
+      ctx.restore();
+    }
 
-    // 3. Crop Rendering
+    // 4. Crop Rendering
       if (plot.watered && !plot.crop.ready) {
         const gt = Math.max(1, plot.crop.growTime || 20000);
         const elapsed = Math.max(0, now - plot.crop.plantedAt);
         const pct = Math.min(1, elapsed / gt);
         const barW = cellW - 12;
         const bx = cx - barW / 2;
-        const by = drawY - 16;
+        const byProg = drawY - 16;
         ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.fillRect(bx, by, barW, 7);
+        ctx.fillRect(bx, byProg, barW, 7);
         ctx.fillStyle = "#2E7D32";
-        ctx.fillRect(bx + 1, by + 1, Math.max(0, (barW - 2) * pct), 5);
+        ctx.fillRect(bx + 1, byProg + 1, Math.max(0, (barW - 2) * pct), 5);
         ctx.fillStyle = "rgba(255,255,255,0.35)";
         ctx.font = '5px "Press Start 2P", monospace';
         ctx.textAlign = "center";
-        ctx.fillText(`${Math.floor(pct * 100)}%`, cx, by - 4);
+        ctx.fillText(`${Math.floor(pct * 100)}%`, cx, byProg - 4);
       }
 
       const { crop } = plot;
@@ -623,7 +648,6 @@ function drawFarmPlots(
       const img = imgs[imgId];
       if (imgId && !imgs[imgId]) loadImg(imgId);
 
-      const by = drawY + cellH - 12;
       const currentStage = Math.max(0, Math.min(4, crop.stage));
       // Visual feedback: stage 0 is very tiny (just planted)
       const stageScales = [0.25, 0.55, 0.8, 1.0, 1.25];
@@ -1457,13 +1481,25 @@ function drawDamageNumbers(ctx: CanvasRenderingContext2D, state: GameState) {
     const alpha = d.life / d.maxLife;
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.font = "bold 16px sans-serif";
+    
+    // Unity-style "pop" effect
+    const scale = 1 + Math.sin((1 - alpha) * Math.PI) * 0.4;
+    ctx.translate(d.x, d.y);
+    ctx.scale(scale, scale);
+
+    ctx.font = 'bold 9px "Press Start 2P", monospace';
     ctx.textAlign = "center";
-    ctx.strokeStyle = "#000";
+    ctx.textBaseline = "middle";
+
+    // Strong Outline
+    ctx.strokeStyle = "rgba(0,0,0,0.85)";
     ctx.lineWidth = 3;
-    ctx.strokeText(d.text, d.x, d.y);
+    ctx.strokeText(d.text, 0, 0);
+
+    // Main text
     ctx.fillStyle = d.color;
-    ctx.fillText(d.text, d.x, d.y);
+    ctx.fillText(d.text, 0, 0);
+    
     ctx.restore();
   }
 }

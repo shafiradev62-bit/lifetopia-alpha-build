@@ -122,8 +122,11 @@ export function abortDemo(): void {
     const s = currentDemoAPI.stateRef.current;
     // Clean up land area immediately so player starts fresh
     s.demoMode = false;
+    currentDemoAPI.setWalletConnected(false);
+    currentDemoAPI.setWalletAddress("");
+    s.player.walletAddress = "";
     s.currentMap = "home"; // Return to farm screen automatically on skip
-    s.notification = { text: "DEMO SKIPPED — STARTING FRESH", life: 100 };
+    s.notification = { text: "DEMO SKIPPED — PLEASE CONNECT WALLET", life: 100 };
     s.farmPlots = s.farmPlots.map(p => ({
       ...p,
       tilled: false,
@@ -277,9 +280,12 @@ export async function runDemoScript(api: DemoAPI): Promise<void> {
   await sleep(4000);
   api.setActivePanel(null);
 
-  // ── DONE ──────────────────────────────────────────────────────────────────
-    caption(api, "DEMO DONE! NOW IT IS YOUR TURN — START FARMING!");
+    // ── DONE ──────────────────────────────────────────────────────────────────
+    caption(api, "DEMO DONE! NOW IT IS YOUR TURN — CONNECT WALLET!");
     api.stateRef.current.demoMode = false;
+    api.setWalletConnected(false);
+    api.setWalletAddress("");
+    api.stateRef.current.player.walletAddress = "";
     api.setDs({ ...api.stateRef.current });
     demoRunning = false;
 

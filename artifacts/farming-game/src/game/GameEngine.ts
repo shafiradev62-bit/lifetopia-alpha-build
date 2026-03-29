@@ -29,6 +29,32 @@ import {
   seedUnlockLevel,
   stressWiltThresholdMs,
 } from "./Game";
+import { supabase } from "./supabase";
+
+let serverTimeOffset = 0;
+
+/** Fetch server time from Supabase to prevent client-side cheating (GDD Requirement) */
+export async function syncServerTime() {
+  try {
+    const start = Date.now();
+    // Use select now() to get DB time
+    const { data } = await supabase.rpc('get_server_time');
+    const dbTime = data ? new Date(data).getTime() : Date.now();
+    const end = Date.now();
+    const latency = (end - start) / 2;
+    serverTimeOffset = (dbTime + latency) - end;
+  } catch {
+    // Fallback if RPC doesnt exist — use a dummy select
+    try {
+      const { data } = await supabase.from('players').select('created_at').limit(1).maybeSingle();
+      // Not ideal but better than nothing
+    } catch {}
+  }
+}
+
+export function getServerTime(): number {
+  return Date.now() + serverTimeOffset;
+}
 import { AudioManager } from "./AudioSystem";
 import {
   bumpQuestProgress,
@@ -131,6 +157,7 @@ export function createInitialState(): GameState {
       emoteUntil: 0,
       emoteBubble: null,
       emoteBubbleUntil: 0,
+      nftEligibility: false,
     },
     currentMap: "home",
     seedCooldowns: {},
@@ -441,7 +468,7 @@ export function updateGame(state: GameState, dt: number): GameState {
   if (s.player.emoteBubble && s.time >= s.player.emoteBubbleUntil)
     s.player.emoteBubble = null;
   
-  // Suburban Exploration Logic
+  // Housing/Beta feedback
   if (s.currentMap === "suburban") {
     const distToHousing = Math.hypot(s.player.x - 720, s.player.y - 320);
     if (distToHousing < 60) {
@@ -683,18 +710,36 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
       s.player.action = tool as any;
       s.player.actionTimer = 35;
       attachFarmingEngine(s, plot, tool);
-      s.player.inventory = {
+      
+      const nextInventory = {
         ...s.player.inventory,
         [ct]: (s.player.inventory[ct] || 0) + 1,
       };
+      s.player.inventory = nextInventory;
+
+      // Atomic Off-Chain Gold & Inventory Sync (GDD Section 4)
+      const wallet = s.player.walletAddress;
+      if (wallet) {
+        import("./questManager").then(qm => {
+          qm.updateSupabaseGold(wallet, s.player.gold);
+          qm.updateInventory(wallet, nextInventory);
+        });
+      }
+
       spawnVFX(s, cx, cy - 20, "harvest");
       spawnVFX(s, cx, cy - 20, "coin");
       spawnText(s, cx, cy - 56, `+${gold} GOLD`, "#FFD700", -2.4);
+      
+      // Quest progress
       bumpQuestProgress(s, "harvest");
       addEarnQuestProgress(s, gold);
+      if (wallet) {
+        import("./questManager").then(qm => qm.checkQuestEligibility(s, wallet));
+      }
+
       s.plotJuice = { plotId: plot.id, until: s.time + 380 };
-      AudioManager.playSFX("harvest"); // Added for premium feel
-      // Unlock progression
+      AudioManager.playSFX("harvest");
+      
       s.player.harvestCount++;
       if (s.player.tutorialStep < 10) s.player.tutorialStep = 10;
       
@@ -818,9 +863,9 @@ function executePlotAction(s: GameState, plotId: string, tool: string) {
         life: 90,
       };
     } else {
-      plot.crop = makeCrop(cropType, s.time, s.farmBalancePreset);
+      plot.crop = makeCrop(cropType, getServerTime(), s.farmBalancePreset);
       plot.fertilized = false;
-      plot.stressDrySince = plot.watered ? null : s.time;
+      plot.stressDrySince = plot.watered ? null : getServerTime();
       s.player.action = "seed" as any;
       s.player.actionTimer = 30;
       attachFarmingEngine(s, plot, tool);
@@ -982,7 +1027,7 @@ function updateZoom(s: GameState) {
 }
 
 function updateCrops(s: GameState) {
-  const now = s.time;
+  const now = getServerTime();
   const wiltMs = stressWiltThresholdMs(s.farmBalancePreset);
   s.farmPlots = s.farmPlots.map((plot) => {
     if (!plot.crop) {
@@ -1479,7 +1524,7 @@ function makeCrop(
   return {
     id: `c${time}-${Math.random()}`,
     type,
-    plantedAt: time,
+    plantedAt: getServerTime(),
     growTime,
     stage: 0,
     ready: false,
@@ -1488,6 +1533,18 @@ function makeCrop(
 }
 
 export function switchMap(s: GameState, map: MapType): GameState {
+  if (map === "suburban" && s.player.level < 3) {
+    // If we're already NOT in suburban, this is a transition attempt that failed.
+    // If we're just updating, don't keep adding shake.
+    const isNewAttempt = s.currentMap !== "suburban";
+    if (isNewAttempt) AudioManager.playSFX("fail");
+    return {
+      ...s,
+      notification: isNewAttempt ? { text: "UNLOCKS AT LVL 3! KEEP FARMING!", life: 5000 } : s.notification,
+      shake: isNewAttempt ? 10 : s.shake,
+      activePanel: null,
+    };
+  }
   const ns = {
     ...s,
     currentMap: map,

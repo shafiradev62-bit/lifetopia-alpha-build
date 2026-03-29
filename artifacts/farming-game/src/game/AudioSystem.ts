@@ -21,6 +21,7 @@ class AudioController {
     harvest: "https://assets.mixkit.co/sfx/preview/mixkit-magical-coin-win-1936.mp3",
     levelUp: "https://assets.mixkit.co/sfx/preview/mixkit-winning-an-extra-bonus-2098.mp3",
     buy: "https://assets.mixkit.co/sfx/preview/mixkit-coins-handling-1939.mp3",
+    fail: "https://assets.mixkit.co/sfx/preview/mixkit-wrong-answer-fail-notification-947.mp3",
   };
 
   constructor() {

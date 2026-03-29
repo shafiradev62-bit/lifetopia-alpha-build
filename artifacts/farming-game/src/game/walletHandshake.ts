@@ -11,15 +11,23 @@ export type WalletAuthProof = {
 const NONCE_KEY = "wallet_auth_nonce";
 
 function buildLoginMessage(address: string, nonce: string): string {
+  const domain = typeof window !== "undefined" ? window.location.host : "lifetopia.io";
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://lifetopia.io";
   return [
-    "Lifetopia Farm — session proof",
-    `Address: ${address}`,
+    `${domain} wants you to sign in with your Solana account:`,
+    `${address}`,
+    "",
+    "Sign in to Lifetopia Pixel Farm to sync your progress.",
+    "",
+    `URI: ${origin}`,
+    "Version: 1",
+    "Chain ID: mainnet",
     `Nonce: ${nonce}`,
-    "Signing proves wallet control for Supabase session binding.",
+    `Issued At: ${new Date().toISOString()}`,
   ].join("\n");
 }
 
-/** Phantom / Solana-compatible signMessage */
+/** Phantom / Solana-compatible signMessage (SIWS Trigger) */
 export async function signSolanaLogin(
   sol: any,
   address: string,
@@ -38,14 +46,16 @@ export async function signSolanaLogin(
     else {
       const raw = out.signature as Uint8Array;
       let bin = "";
-      raw.forEach((b) => {
-        bin += String.fromCharCode(b);
-      });
+      raw.forEach((b) => { bin += String.fromCharCode(b); });
       signature = btoa(bin);
     }
   } else {
     throw new Error("Solana wallet has no signMessage");
   }
+  
+  // Upsert to players table immediately
+  await upsertPlayerToSupabase(address);
+  
   return {
     address,
     chain: "solana",
@@ -53,6 +63,19 @@ export async function signSolanaLogin(
     signature,
     issuedAt: Date.now(),
   };
+}
+
+/** Atomic upsert to Supabase players table */
+export async function upsertPlayerToSupabase(walletAddress: string) {
+  try {
+    const { error } = await supabase.from('players').upsert({
+      wallet_address: walletAddress,
+      last_login: new Date().toISOString()
+    }, { onConflict: 'wallet_address' });
+    if (error) console.error("Upsert player error:", error);
+  } catch (e) {
+    console.error("Supabase upsert failed:", e);
+  }
 }
 
 /** MetaMask / eth_signTypedData or personal_sign */

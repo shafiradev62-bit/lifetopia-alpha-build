@@ -423,37 +423,39 @@ export default function PreFarmTutorial({ visible, onFinished, onMapFocus }: Pre
       {/* Dialogue box */}
       <div onClick={skipTyping} style={{
         position:"absolute", left:"50%",
-        top:dialogueAtTop?90:"auto", bottom:dialogueAtTop?"auto":100,
+        top:dialogueAtTop? (cSize.h < 500 ? 10 : 90) : "auto", 
+        bottom:dialogueAtTop?"auto" : (cSize.h < 500 ? 55 : 100),
         transform:"translateX(-50%)",
-        width:"min(1060px,96%)",
-        background:"#f4c692", border:"8px solid #5C4033", borderRadius:4,
-        boxShadow:"0 20px 60px rgba(0,0,0,0.8),inset 0 0 0 4px #8B5E3C",
+        width:"min(1120px,96%)",
+        maxHeight: cSize.h < 500 ? "40%" : "auto",
+        background:"#f4c692", border: cSize.h < 500 ? "4px solid #5C4033" : "8px solid #5C4033", borderRadius:4,
+        boxShadow:"0 15px 40px rgba(0,0,0,0.8),inset 0 0 0 2px #8B5E3C",
         display:"flex", zIndex:100, overflow:"hidden", cursor:"pointer",
       }}>
         <div style={{width:12,background:"#4a2c1a",borderRight:"4px solid #8B5E3C",flexShrink:0}}/>
-        <div style={{flex:1,padding:"18px 22px",display:"flex",flexDirection:"column",gap:8}}>
-          <div style={{fontFamily:"'Press Start 2P',monospace",fontSize:7,color:"#8B4513",letterSpacing:1}}>
+        <div style={{flex:1,padding: cSize.h < 500 ? "10px 14px" : "18px 22px",display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontFamily:"'Press Start 2P',monospace",fontSize: cSize.h < 500 ? 5 : 7,color:"#8B4513",letterSpacing:1}}>
             {detailIndex===-1?`◆ ${step.title}`:`TIP ${curDetail}/${totalDetails} — ${step.title}`}
           </div>
-          <div style={{fontFamily:"'Press Start 2P',monospace",fontSize:12,lineHeight:"1.9",color:"#3a2212",textShadow:"1px 1px 0 rgba(255,255,255,0.35)",minHeight:50}}>
+          <div style={{fontFamily:"'Press Start 2P',monospace",fontSize: cSize.h < 500 ? 8 : 12,lineHeight:"1.9",color:"#3a2212",textShadow:"1px 1px 0 rgba(255,255,255,0.35)",minHeight: cSize.h < 500 ? 30 : 50}}>
             {typedBubble}
             <span style={{display:"inline-block",width:2,height:13,background:"#3a2212",marginLeft:2,animation:"pft-blink 0.7s step-end infinite",verticalAlign:"middle"}}/>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontFamily:"'Press Start 2P',monospace",fontSize:5,color:"rgba(58,34,18,0.45)"}}>CLICK TO SKIP TYPING</div>
+            <div style={{fontFamily:"'Press Start 2P',monospace",fontSize: cSize.h < 500 ? 4 : 5,color:"rgba(58,34,18,0.45)"}}>CLICK TO SKIP TYPING</div>
             <div style={{display:"flex",gap:10}}>
-              <button className="pft-wb" onClick={e=>{e.stopPropagation();handleSkip();}}>SKIP ALL</button>
-              <button className="pft-wb primary" onClick={e=>{e.stopPropagation();handleNext();}}>
-                {stepIndex===STEPS.length-1&&detailIndex===step.details.length-1?"START FARMING ▶":detailIndex<step.details.length-1?"NEXT TIP ▶":"NEXT ▶"}
+              <button className="pft-wb" style={{fontSize: cSize.h < 500 ? 6 : 8, padding: "6px 12px"}} onClick={e=>{e.stopPropagation();handleSkip();}}>SKIP ALL</button>
+              <button className="pft-wb primary" style={{fontSize: cSize.h < 500 ? 6 : 8, padding: "6px 14px"}} onClick={e=>{e.stopPropagation();handleNext();}}>
+                {stepIndex===STEPS.length-1&&detailIndex===step.details.length-1? (cSize.h < 500 ? "START" : "START FARMING ▶") : detailIndex<step.details.length-1?"NEXT TIP ▶":"NEXT ▶"}
               </button>
             </div>
           </div>
         </div>
-        <div style={{width:210,borderLeft:"8px solid #5C4033",background:"#e0b080",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-          <div style={{background:"#f4c692",padding:8,border:"4px solid #5C4033",borderRadius:4,marginBottom:8,width:136,height:136,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
-            <img src={step.portrait} style={{height:124,imageRendering:"pixelated"}} alt=""/>
+        <div style={{width: cSize.h < 500 ? 110 : 210, borderLeft: cSize.h < 500 ? "4px solid #5C4033" : "8px solid #5C4033",background: "#e0b080",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+          <div style={{background:"#f4c692",padding: cSize.h < 500 ? 4 : 8,border: cSize.h < 500 ? "2px solid #5C4033" : "4px solid #5C4033",borderRadius:4,marginBottom:8,width: cSize.h < 500 ? 70 : 136,height: cSize.h < 500 ? 70 : 136,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+            <img src={step.portrait} style={{height: cSize.h < 500 ? 64 : 124,imageRendering:"pixelated"}} alt=""/>
           </div>
-          <div style={{background:"#3a2212",color:"#FFF5E0",padding:"4px 12px",fontFamily:"'Press Start 2P',monospace",fontSize:7,borderRadius:4}}>GUIDE</div>
+          <div style={{background:"#3a2212",color:"#FFF5E0",padding:"2px 8px",fontFamily:"'Press Start 2P',monospace",fontSize: cSize.h < 500 ? 5 : 7,borderRadius:4}}>GUIDE</div>
           <div style={{display:"flex",gap:4,marginTop:8,flexWrap:"wrap",justifyContent:"center",padding:"0 8px"}}>
             {STEPS.map((_,i)=>(
               <div key={i} style={{width:7,height:7,borderRadius:"50%",background:i===stepIndex?"#FFD700":i<stepIndex?"#8BC34A":"rgba(255,255,255,0.25)",border:"1px solid rgba(0,0,0,0.3)",transition:"all 0.3s"}}/>

@@ -221,6 +221,7 @@ export interface GameState {
     emoteUntil: number;
     emoteBubble: string | null;
     emoteBubbleUntil: number;
+    nftEligibility: boolean;
   };
   currentMap: MapType;
   farmPlots: FarmPlot[];
@@ -296,16 +297,16 @@ export interface GameState {
 export const CROP_BASE_GROW_MS: Record<CropType, number> = {
   wheat: 120000,
   tomato: 240000,
-  carrot: 200000,
+  carrot: 360000,
   pumpkin: 480000,
 };
 
 /** Base sell gold before difficulty multiplier */
 export const CROP_BASE_SELL_GOLD: Record<CropType, number> = {
-  wheat: 10,
-  tomato: 22,
-  carrot: 18,
-  pumpkin: 55,
+  wheat: 5,
+  tomato: 10,
+  carrot: 15,
+  pumpkin: 25,
 };
 
 export const CROP_HARVEST_XP: Record<CropType, number> = {
@@ -433,8 +434,8 @@ export function seedUnlockLevel(
 ): number {
   if (crop === "wheat") return 1;
   if (crop === "tomato") return 1;
-  if (crop === "carrot") return 1;
-  if (crop === "pumpkin") return 1;
+  if (crop === "carrot") return 3;
+  if (crop === "pumpkin") return 5;
   return 1;
 }
 

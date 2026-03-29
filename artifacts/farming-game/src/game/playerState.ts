@@ -8,9 +8,9 @@ export function getDefaultFarmingSpeedMultiplier(): number {
   return 1;
 }
 
-/** NFT Alpha: 0.5 = half grow duration (2× faster). */
+/** NFT Alpha: 0.8 = 20% faster grow duration. */
 export function computeFarmingMultiplier(hasAlphaNFT: boolean): number {
-  return hasAlphaNFT ? 0.5 : 1;
+  return hasAlphaNFT ? 0.8 : 1;
 }
 
 export function applyNFTBoostsToState(

@@ -89,6 +89,32 @@ export function claimQuestReward(
   return { reward };
 }
 
+/** Atomic update to player inventory in Supabase */
+export async function updateInventory(
+  walletAddress: string,
+  inventory: Record<string, number>
+): Promise<boolean> {
+  if (!walletAddress || walletAddress.toLowerCase().startsWith("guest")) return false;
+  try {
+    const { error } = await supabase.from("players").upsert(
+      { wallet_address: walletAddress, inventory, last_seen: new Date().toISOString() },
+      { onConflict: "wallet_address" }
+    );
+    return !error;
+  } catch { return false; }
+}
+
+/** Check if all daily quests are done and set eligibility */
+export async function checkQuestEligibility(state: GameState, wallet: string) {
+  if (!wallet || wallet.toLowerCase().startsWith("guest")) return;
+  const allDone = state.quests.every(q => q.completed);
+  if (allDone) {
+    try {
+      await supabase.from("players").update({ nft_eligibility: true }).eq("wallet_address", wallet);
+    } catch (e) { console.error("NFT eligibility sync failed", e); }
+  }
+}
+
 export function applyStoredQuestClaims(state: GameState, wallet: string) {
   const key =
     wallet && wallet.length > 0 && !wallet.toLowerCase().startsWith("guest")
@@ -100,4 +126,6 @@ export function applyStoredQuestClaims(state: GameState, wallet: string) {
       ? { ...q, claimed: true, completed: true, current: q.target }
       : q,
   );
+  // Check eligibility on load
+  if (wallet) void checkQuestEligibility(state, wallet);
 }

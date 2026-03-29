@@ -15,12 +15,12 @@ export const BLOCKCHAIN_CONFIG = {
 };
 
 /**
- * Returns true if wallet holds at least one token/NFT from Alpha mint on devnet.
- * If VITE_ALPHA_NFT_MINT is unset, falls back to false (no boost).
+ * Scan wallet user on Solana Devnet for "Alpha" Mint Address.
+ * GDD Section 8 Requirement.
  */
-export async function checkSolanaNFT(walletAddress: string): Promise<boolean> {
-  const mint = BLOCKCHAIN_CONFIG.ALPHA_NFT_MINT?.trim();
-  if (!walletAddress || !mint) return false;
+export async function CheckNFTOwnership(walletAddress: string): Promise<boolean> {
+  const mint = BLOCKCHAIN_CONFIG.ALPHA_NFT_MINT?.trim() || "CG8dh8s8P8y7seC3hB9QWuoBX81ug8MvfZK9s9WjaQFT";
+  if (!walletAddress) return false;
 
   try {
     const body = {
@@ -42,6 +42,9 @@ export async function checkSolanaNFT(walletAddress: string): Promise<boolean> {
     return false;
   }
 }
+
+/** Legacy alias for CheckNFTOwnership */
+export const checkSolanaNFT = CheckNFTOwnership;
 
 export interface TokenBalanceResponse {
   jsonrpc: string;

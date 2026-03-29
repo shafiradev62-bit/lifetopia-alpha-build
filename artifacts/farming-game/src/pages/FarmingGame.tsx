@@ -114,6 +114,13 @@ export default function FarmingGame() {
   const animRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const [ds, setDs] = useState<GameState>(stateRef.current);
+  const [guestId] = useState(() => {
+    const saved = localStorage.getItem("guest_id");
+    if (saved) return saved;
+    const nid = `guest_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem("guest_id", nid);
+    return nid;
+  });
   const [loaded, setLoaded] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [introTutorialDone, setIntroTutorialDone] = useState(false);
@@ -412,6 +419,7 @@ export default function FarmingGame() {
         stateRef.current.player.level = level;
         stateRef.current.player.maxExp = typeof data.max_exp === "number" ? data.max_exp : stateRef.current.player.maxExp;
         stateRef.current.player.inventory = (data.inventory as GameState["player"]["inventory"]) || stateRef.current.player.inventory;
+        stateRef.current.player.nftEligibility = !!data.nft_eligibility;
         if (data.nfts && Array.isArray(data.nfts)) setNfts(data.nfts as string[]);
         applyStoredQuestClaims(stateRef.current, addr);
         lastServerEconomyRef.current = snapshotEconomy(stateRef.current.player);
@@ -514,18 +522,25 @@ export default function FarmingGame() {
 
   useEffect(() => {
     if (!splashDone || !introTutorialDone || ds.currentMap !== "garden") return;
-    const addr = walletAddress || stateRef.current.player.walletAddress;
+    const addr = walletAddress || stateRef.current.player.walletAddress || guestId;
     if (!addr) return;
     const channel = supabase.channel("garden-live", { config: { presence: { key: addr } } });
-    const pushPresence = () => void channel.track({ x: stateRef.current.player.x, y: stateRef.current.player.y, at: Date.now() });
+    const pushPresence = () => void channel.track({
+      x: stateRef.current.player.x,
+      y: stateRef.current.player.y,
+      emote: stateRef.current.player.emote,
+      at: Date.now()
+    });
     channel.subscribe(async (status) => { if (status === "SUBSCRIBED") pushPresence(); });
     const flushOthers = () => {
-      const st = channel.presenceState() as Record<string, Array<{ x?: number; y?: number }>>;
-      const others: { id: string; x: number; y: number }[] = [];
+      const st = channel.presenceState() as Record<string, Array<{ x?: number; y?: number; emote?: string }>>;
+      const others: { id: string; x: number; y: number; emote?: any }[] = [];
       for (const [key, entries] of Object.entries(st)) {
         if (key === addr) continue;
         const v = entries?.[0];
-        if (v && typeof v.x === "number" && typeof v.y === "number") others.push({ id: key.slice(0, 12), x: v.x, y: v.y });
+        if (v && typeof v.x === "number" && typeof v.y === "number") {
+          others.push({ id: key.slice(0, 12), x: v.x, y: v.y, emote: v.emote });
+        }
       }
       stateRef.current.gardenRemotePlayers = others;
     };
@@ -544,16 +559,26 @@ export default function FarmingGame() {
     setDs({ ...stateRef.current });
     const result = await transferTokenToUser(addr, 10);
     if (result.success) {
-      const newNft = `LFG Token Claim #${nfts.length + 1} | tx: ${result.txid?.slice(0, 8)}...`;
+      const newNft = `ALPHA NFT #${nfts.length + 1} | ID: ${result.txid?.slice(0, 6)}`;
       const updatedNfts = [...nfts, newNft];
       setNfts(updatedNfts);
+      
       const onChainBalance = await getTokenBalance(addr);
       stateRef.current.player.lifetopiaGold = onChainBalance;
-      const claimText = "+10 LFG CLAIMED!";
-      stateRef.current.notification = { text: claimText, life: 150 };
+      stateRef.current.player.nftEligibility = false; // Claimed
+      
+      const claimText = "ALPHA NFT CLAIMED!";
+      stateRef.current.notification = { text: claimText, life: 3500 };
       triggerPopup(claimText);
       setDs({ ...stateRef.current });
-      try { await supabase.from("players").upsert({ wallet_address: addr, nfts: updatedNfts, gold: stateRef.current.player.gold, exp: stateRef.current.player.exp, level: stateRef.current.player.level }, { onConflict: "wallet_address" }); } catch { /* non-fatal */ }
+
+      try {
+        await supabase.from("players").update({ 
+          nfts: updatedNfts, 
+          nft_eligibility: false,
+          gold: stateRef.current.player.gold 
+        }).eq("wallet_address", addr);
+      } catch { /* non-fatal sync */ }
     } else {
       stateRef.current.notification = { text: result.error?.slice(0, 40).toUpperCase() || "CLAIM FAILED", life: 150 };
       setDs({ ...stateRef.current });
@@ -834,9 +859,27 @@ export default function FarmingGame() {
   const mapHint = splashDone && introTutorialDone && ds.currentMap !== "home"
     ? MAP_REASON[ds.currentMap] ?? null : null;
 
+  const containerStyle: React.CSSProperties = isMobile ? {
+    position: "relative",
+    width: "100dvw",
+    height: "100dvh",
+    overflow: "hidden",
+    background: "#000",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  } : {
+    position: "relative",
+    width: 1280,
+    height: 720,
+    overflow: "hidden",
+    background: "#000",
+    margin: "0 auto",
+  };
+
   // ── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <div ref={gameRootRef} style={{ position: "relative", width: isMobile ? "100vw" : 1280, height: isMobile ? "100dvh" : 720, overflow: "hidden", background: "#000", margin: "0 auto" }}>
+    <div ref={gameRootRef} style={containerStyle}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
         .gf { font-family: 'Press Start 2P', 'Courier New', monospace; }
@@ -906,7 +949,7 @@ export default function FarmingGame() {
         onMouseLeave={() => { stateRef.current.pointerCanvas = null; stateRef.current.plotHoverFromPointer = null; }}
         onWheel={onWheel}
         onTouchEnd={onTouchEnd}
-        style={{ display: "block", width: "100%", height: "100%", cursor: "crosshair", touchAction: "none", imageRendering: "pixelated" }}
+        style={{ display: "block", width: isMobile ? "auto" : "100%", height: isMobile ? "auto" : "100%", maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "crosshair", touchAction: "none", imageRendering: "pixelated" }}
       />
 
       {/* ── MOBILE QUADRANT CONTROLLER ── */}
@@ -1336,9 +1379,15 @@ export default function FarmingGame() {
                   ) : (
                     <div style={{ fontSize: 8, color: "#4D2D18", marginBottom: 16 }}>NO NFTS DETECTED</div>
                   )}
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="wb gf" onClick={async () => { AudioManager.playSFX("click"); const res = await initializeTokenAccount(); stateRef.current.notification = { text: res.success ? "INITIALIZED!" : (res.error || "INIT FAILED").toUpperCase().slice(0,40), life: 200 }; setDs({ ...stateRef.current }); }} style={{ flex: 1, fontSize: 7 }}>INIT ACCOUNT</button>
-                    <button className="wb gf" onClick={() => { claimNFT(); AudioManager.playSFX("click"); }} style={{ flex: 1, fontSize: 7 }}>CLAIM ALPHA NFT</button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button className="wb gf" onClick={async () => { AudioManager.playSFX("click"); const res = await initializeTokenAccount(); stateRef.current.notification = { text: res.success ? "INITIALIZED!" : (res.error || "INIT FAILED").toUpperCase().slice(0,40), life: 200 }; setDs({ ...stateRef.current }); }} style={{ width: "100%", fontSize: 7 }}>INIT ACCOUNT</button>
+                    {ds.player.nftEligibility ? (
+                      <button className="wb gf" onClick={() => { claimNFT(); AudioManager.playSFX("click"); }} style={{ width: "100%", fontSize: 7, background: "linear-gradient(180deg, #A2FF9E, #228B22)", color: "#FFF", border: "2px solid #FFF" }}>CLAIM ALPHA NFT</button>
+                    ) : (
+                      <div className="gf" style={{ fontSize: 6, color: "#8B4513", marginTop: 10, background: "rgba(0,0,0,0.05)", padding: 8, borderRadius: 8 }}>
+                        FINISH ALL DAILY TASKS TO UNLOCK THIS NFT CLAIM!
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
