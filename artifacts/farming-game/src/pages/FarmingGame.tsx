@@ -29,6 +29,7 @@ import {
   isMobilePlatform, openWalletDeepLink, detectWalletEnvironment,
 } from "../game/MobileController";
 import QuadrantController from "../components/QuadrantController";
+import WorldMapScreen from "../components/WorldMapScreen";
 import MobileHUD from "../components/MobileHUD";
 import ActionPopup, { type ActionPopupData } from "../components/ActionPopup";
 import { registerDemoTrigger, abortDemo } from "../game/DemoScript";
@@ -124,6 +125,7 @@ export default function FarmingGame() {
   const [loaded, setLoaded] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const [introTutorialDone, setIntroTutorialDone] = useState(false);
+  const [showWorldMap, setShowWorldMap] = useState(false);
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [tutorialActive, setTutorialActive] = useState(false);
   const [tutStep, setTutStep] = useState(0);
@@ -269,14 +271,17 @@ export default function FarmingGame() {
 
   const handlePreFarmTutorialFinished = useCallback(() => {
     setIntroTutorialDone(true);
-    stateRef.current.currentMap = "home";
-    stateRef.current.notification = { text: "WELCOME TO LIFETOPIA FARM!", life: 160 };
-    setDs({ ...stateRef.current });
-    // Auto-start demo immediately after tutorial skip/finish
-    setTimeout(() => {
-      doSwitchMap("home"); // Ensure we land exactly at farm
-      (window as any).startLifetopiaDemo?.();
-    }, 600);
+    if (isMobile) {
+      setShowWorldMap(true); // Mobile: show world map chooser after tutorial
+    } else {
+      stateRef.current.currentMap = "home";
+      stateRef.current.notification = { text: "WELCOME TO LIFETOPIA FARM!", life: 160 };
+      setDs({ ...stateRef.current });
+      setTimeout(() => {
+        doSwitchMap("home");
+        (window as any).startLifetopiaDemo?.();
+      }, 600);
+    }
   }, []);
 
   const handlePreFarmMapFocus = useCallback((map: MapType) => {
@@ -800,6 +805,7 @@ export default function FarmingGame() {
   const onClick = (e: React.MouseEvent) => {
     if (activePanel) return;
     if (stateRef.current.demoMode) return;
+    if (showWorldMap) return; // let WorldMapScreen handle it
     
     const s = stateRef.current;
     if (s.fishingSession) {
@@ -827,6 +833,7 @@ export default function FarmingGame() {
   const onTouchEnd = (e: React.TouchEvent) => {
     if (activePanel) return;
     if (stateRef.current.demoMode) return;
+    if (showWorldMap) return; // let WorldMapScreen handle it
     const canvas = canvasRef.current;
     if (!canvas) return;
     const touch = e.changedTouches[0];
@@ -996,7 +1003,7 @@ export default function FarmingGame() {
       </div>
 
       {/* ── MOBILE QUADRANT CONTROLLER ── */}
-      {isMobile && splashDone && introTutorialDone && !activePanel && (
+      {isMobile && splashDone && introTutorialDone && !activePanel && !showWorldMap && (
         <QuadrantController onDirChange={handleMobileDirChange} disabled={!!activePanel} />
       )}
 
@@ -1036,14 +1043,27 @@ export default function FarmingGame() {
         <PreFarmTutorial visible={true} onFinished={handlePreFarmTutorialFinished} onMapFocus={handlePreFarmMapFocus} />
       )}
 
-      {/* ── MOBILE HUD (replaces desktop HUD on mobile) ── */}
-      {isMobile && splashDone && introTutorialDone && (
+      {/* ── MOBILE WORLD MAP — shown after tutorial, also via HOME button ── */}
+      {isMobile && splashDone && introTutorialDone && showWorldMap && (
+        <WorldMapScreen
+          onSelectMap={(map: MapType) => {
+            doSwitchMap(map);
+            AudioManager.playSFX("click");
+            setShowWorldMap(false);
+          }}
+          currentMap={ds.currentMap}
+          playerLevel={ds.player.level}
+        />
+      )}
+
+      {/* ── MOBILE HUD (replaces desktop HUD on mobile) — hidden when WorldMapScreen open ── */}
+      {isMobile && splashDone && introTutorialDone && !showWorldMap && (
         <MobileHUD
           ds={ds}
           tools={TOOLS}
           onSelectTool={selectTool}
           onOpenInventory={() => {}}
-          onOpenMap={doSwitchMap}
+          onOpenMap={() => setShowWorldMap(true)}
           currentMap={ds.currentMap}
           maps={MAPS}
           gold={ds.player.gold}
